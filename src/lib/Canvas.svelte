@@ -20,11 +20,13 @@
   let selectedStroke = '#333333'
   let selectedStrokeWidth = 2
   let selectedFill = '#ff6b6b'
+  let hasSelection = false
 
   $: {
     // Update property controls when selection changes
     if (renderer) {
       const selected = renderer.getSelectedShape()
+      hasSelection = selected !== null
       if (selected) {
         selectedStroke = selected.props.stroke || '#333333'
         selectedStrokeWidth = selected.props.strokeWidth || 2
@@ -96,6 +98,7 @@
     if (toolManager) {
       toolManager.setTool(tool)
       renderer.selectShape(null)
+      hasSelection = false
     }
   }
 
@@ -123,8 +126,10 @@
         draggedShapeId = clickedShape.props.id
         dragStart = { x, y }
         renderer.selectShape(clickedShape.props.id)
+        hasSelection = true
       } else {
         renderer.selectShape(null)
+        hasSelection = false
       }
     } else if (currentTool === 'path') {
       // Path tool: add point on click
@@ -191,6 +196,7 @@
       if (shape) {
         renderer.addShape(shape)
         renderer.selectShape(shape.props.id)
+        hasSelection = true
       }
       renderer.setPreview(null)
     }
@@ -204,6 +210,7 @@
     if (shape) {
       renderer.addShape(shape)
       renderer.selectShape(shape.props.id)
+      hasSelection = true
     }
     renderer.setPreview(null)
   }
@@ -262,7 +269,7 @@
           type="color"
           value={selectedStroke}
           oninput={(e) => updateStroke(e.currentTarget.value)}
-          disabled={!renderer?.getSelectedShape()}
+          disabled={!hasSelection}
         />
       </label>
 
@@ -274,7 +281,7 @@
           max="20"
           value={selectedStrokeWidth}
           oninput={(e) => updateStrokeWidth(Number(e.currentTarget.value))}
-          disabled={!renderer?.getSelectedShape()}
+          disabled={!hasSelection}
         />
         <span class="value-display">{selectedStrokeWidth}px</span>
       </label>
@@ -285,7 +292,7 @@
           type="color"
           value={selectedFill}
           oninput={(e) => updateFill(e.currentTarget.value)}
-          disabled={!renderer?.getSelectedShape()}
+          disabled={!hasSelection}
         />
       </label>
     </div>
@@ -299,63 +306,61 @@
 
   <div class="main-content">
     <aside class="tool-palette">
-    <h2>Tools</h2>
+      <h2>Tools</h2>
 
-    <div class="tool-buttons">
-      <button
-        class:active={currentTool === 'select'}
-        onclick={() => setTool('select')}
-        title="Select Tool (V)"
-      >
-        <span class="icon">✋</span>
-        <span class="label">Select</span>
-      </button>
-      <button
-        class:active={currentTool === 'rect'}
-        onclick={() => setTool('rect')}
-        title="Rectangle Tool (R)"
-      >
-        <span class="icon">⬜</span>
-        <span class="label">Rect</span>
-      </button>
-      <button
-        class:active={currentTool === 'circle'}
-        onclick={() => setTool('circle')}
-        title="Circle Tool (C)"
-      >
-        <span class="icon">⭕</span>
-        <span class="label">Circle</span>
-      </button>
-      <button
-        class:active={currentTool === 'line'}
-        onclick={() => setTool('line')}
-        title="Line Tool (L)"
-      >
-        <span class="icon">📏</span>
-        <span class="label">Line</span>
-      </button>
-      <button
-        class:active={currentTool === 'path'}
-        onclick={() => setTool('path')}
-        title="Path Tool (P)"
-      >
-        <span class="icon">🖊️</span>
-        <span class="label">Path</span>
-      </button>
-    </div>
-
-    </div>
+      <div class="tool-buttons">
+        <button
+          class:active={currentTool === 'select'}
+          onclick={() => setTool('select')}
+          title="Select Tool (V)"
+        >
+          <span class="icon">✋</span>
+          <span class="label">Select</span>
+        </button>
+        <button
+          class:active={currentTool === 'rect'}
+          onclick={() => setTool('rect')}
+          title="Rectangle Tool (R)"
+        >
+          <span class="icon">⬜</span>
+          <span class="label">Rect</span>
+        </button>
+        <button
+          class:active={currentTool === 'circle'}
+          onclick={() => setTool('circle')}
+          title="Circle Tool (C)"
+        >
+          <span class="icon">⭕</span>
+          <span class="label">Circle</span>
+        </button>
+        <button
+          class:active={currentTool === 'line'}
+          onclick={() => setTool('line')}
+          title="Line Tool (L)"
+        >
+          <span class="icon">📏</span>
+          <span class="label">Line</span>
+        </button>
+        <button
+          class:active={currentTool === 'path'}
+          onclick={() => setTool('path')}
+          title="Path Tool (P)"
+        >
+          <span class="icon">🖊️</span>
+          <span class="label">Path</span>
+        </button>
+      </div>
     </aside>
 
     <main class="canvas-area" bind:this={canvasContainer}>
-    <canvas
-      bind:this={canvas}
-      onmousedown={handleMouseDown}
-      onmousemove={handleMouseMove}
-      onmouseup={handleMouseUp}
-      onmouseleave={handleMouseUp}
-      ondblclick={handleDblClick}
-    ></canvas>
+      <canvas
+        bind:this={canvas}
+        onmousedown={handleMouseDown}
+        onmousemove={handleMouseMove}
+        onmouseup={handleMouseUp}
+        onmouseleave={handleMouseUp}
+        ondblclick={handleDblClick}
+      ></canvas>
     </main>
   </div>
 </div>
@@ -497,8 +502,7 @@
     letter-spacing: 0.5px;
   }
 
-  .tool-buttons,
-  .action-buttons {
+  .tool-buttons {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -541,12 +545,6 @@
     background: #2196F3;
     color: #fff;
     border-color: #1976D2;
-  }
-
-  .divider {
-    height: 1px;
-    background: #4a4a4a;
-    margin: 4px 0;
   }
 
   .canvas-area {
