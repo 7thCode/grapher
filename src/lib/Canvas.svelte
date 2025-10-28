@@ -4,9 +4,12 @@
   import { ToolManager, type ToolType } from './engine/Tool'
   import type { HandleType } from './engine/TransformControls'
   import { saveSVGFile } from './utils/electron'
+  import type { Shape } from './engine/Shape'
+  import { Rect, Circle, Line, Path } from './engine/Shape'
 
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
+  let fileInput: HTMLInputElement
   let renderer: Renderer
   let toolManager: ToolManager
   let currentTool: ToolType = 'rect'
@@ -21,6 +24,9 @@
   let selectedStrokeWidth = 2
   let selectedFill = '#ff6b6b'
   let hasSelection = false
+
+  // Clipboard for copy/paste
+  let clipboardShape: Shape | null = null
 
   $: {
     // Update property controls when selection changes
@@ -216,11 +222,86 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // Copy: Cmd+C / Ctrl+C
+    if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+      e.preventDefault()
+      copyShape()
+      return
+    }
+
+    // Paste: Cmd+V / Ctrl+V
+    if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+      e.preventDefault()
+      pasteShape()
+      return
+    }
+
+    // ESC to cancel path drawing
     if (e.key === 'Escape' && currentTool === 'path') {
-      // ESC to cancel path drawing
       toolManager.cancelDrawing()
       renderer.setPreview(null)
     }
+  }
+
+  function copyShape() {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      clipboardShape = selected
+      console.log('Shape copied to clipboard')
+    }
+  }
+
+  function pasteShape() {
+    if (!renderer || !clipboardShape) return
+
+    // Clone the shape with a new ID and offset position
+    let newShape: Shape
+    const offset = 20
+
+    if (clipboardShape instanceof Rect) {
+      newShape = new Rect({
+        ...clipboardShape.props,
+        id: `rect-${Date.now()}`,
+        x: clipboardShape.props.x + offset,
+        y: clipboardShape.props.y + offset
+      })
+    } else if (clipboardShape instanceof Circle) {
+      newShape = new Circle({
+        ...clipboardShape.props,
+        id: `circle-${Date.now()}`,
+        cx: clipboardShape.props.cx + offset,
+        cy: clipboardShape.props.cy + offset,
+        x: clipboardShape.props.x + offset,
+        y: clipboardShape.props.y + offset
+      })
+    } else if (clipboardShape instanceof Line) {
+      newShape = new Line({
+        ...clipboardShape.props,
+        id: `line-${Date.now()}`,
+        x: clipboardShape.props.x + offset,
+        y: clipboardShape.props.y + offset,
+        x1: clipboardShape.props.x1 + offset,
+        y1: clipboardShape.props.y1 + offset,
+        x2: clipboardShape.props.x2 + offset,
+        y2: clipboardShape.props.y2 + offset
+      })
+    } else if (clipboardShape instanceof Path) {
+      newShape = new Path({
+        ...clipboardShape.props,
+        id: `path-${Date.now()}`,
+        x: clipboardShape.props.x + offset,
+        y: clipboardShape.props.y + offset,
+        d: clipboardShape.props.d
+      })
+    } else {
+      return
+    }
+
+    renderer.addShape(newShape)
+    renderer.selectShape(newShape.props.id)
+    hasSelection = true
+    console.log('Shape pasted')
   }
 
   async function exportSVG() {
@@ -257,6 +338,131 @@
     if (!renderer) return
     const shapes = renderer.getShapes()
     shapes.forEach((s) => renderer.removeShape(s.props.id))
+  }
+
+  function openLoadDialog() {
+    fileInput?.click()
+  }
+
+  async function handleFileLoad(e: Event) {
+    const target = e.target as HTMLInputElement
+    const file = target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      loadSVG(text)
+      target.value = '' // Reset input
+    } catch (err) {
+      console.error('Failed to load SVG:', err)
+      alert('Failed to load SVG file')
+    }
+  }
+
+  function loadSVG(svgString: string) {
+    if (!renderer) return
+
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(svgString, 'image/svg+xml')
+    const svg = doc.querySelector('svg')
+    if (!svg) {
+      alert('Invalid SVG file')
+      return
+    }
+
+    // Parse rect elements
+    const rects = svg.querySelectorAll('rect')
+    rects.forEach((rect) => {
+      const x = parseFloat(rect.getAttribute('x') || '0')
+      const y = parseFloat(rect.getAttribute('y') || '0')
+      const width = parseFloat(rect.getAttribute('width') || '0')
+      const height = parseFloat(rect.getAttribute('height') || '0')
+      const fill = rect.getAttribute('fill') || '#4CAF50'
+      const stroke = rect.getAttribute('stroke') || undefined
+      const strokeWidth = parseFloat(rect.getAttribute('stroke-width') || '1')
+
+      const shape = new Rect({
+        id: `rect-${Date.now()}-${Math.random()}`,
+        x,
+        y,
+        width,
+        height,
+        fill,
+        stroke,
+        strokeWidth
+      })
+      renderer.addShape(shape)
+    })
+
+    // Parse circle elements
+    const circles = svg.querySelectorAll('circle')
+    circles.forEach((circle) => {
+      const cx = parseFloat(circle.getAttribute('cx') || '0')
+      const cy = parseFloat(circle.getAttribute('cy') || '0')
+      const r = parseFloat(circle.getAttribute('r') || '0')
+      const fill = circle.getAttribute('fill') || '#4CAF50'
+      const stroke = circle.getAttribute('stroke') || undefined
+      const strokeWidth = parseFloat(circle.getAttribute('stroke-width') || '1')
+
+      const shape = new Circle({
+        id: `circle-${Date.now()}-${Math.random()}`,
+        x: cx - r,
+        y: cy - r,
+        cx,
+        cy,
+        r,
+        fill,
+        stroke,
+        strokeWidth
+      })
+      renderer.addShape(shape)
+    })
+
+    // Parse line elements
+    const lines = svg.querySelectorAll('line')
+    lines.forEach((line) => {
+      const x1 = parseFloat(line.getAttribute('x1') || '0')
+      const y1 = parseFloat(line.getAttribute('y1') || '0')
+      const x2 = parseFloat(line.getAttribute('x2') || '0')
+      const y2 = parseFloat(line.getAttribute('y2') || '0')
+      const stroke = line.getAttribute('stroke') || '#333'
+      const strokeWidth = parseFloat(line.getAttribute('stroke-width') || '2')
+
+      const shape = new Line({
+        id: `line-${Date.now()}-${Math.random()}`,
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        x1,
+        y1,
+        x2,
+        y2,
+        stroke,
+        strokeWidth
+      })
+      renderer.addShape(shape)
+    })
+
+    // Parse path elements
+    const paths = svg.querySelectorAll('path')
+    paths.forEach((path) => {
+      const d = path.getAttribute('d') || ''
+      const stroke = path.getAttribute('stroke') || '#333'
+      const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
+      const fill = path.getAttribute('fill') || 'none'
+
+      const shape = new Path({
+        id: `path-${Date.now()}-${Math.random()}`,
+        x: 0,
+        y: 0,
+        d,
+        stroke,
+        strokeWidth,
+        fill: fill === 'none' ? undefined : fill
+      })
+      renderer.addShape(shape)
+    })
+
+    console.log('SVG loaded successfully')
   }
 </script>
 
@@ -298,11 +504,21 @@
     </div>
 
     <div class="toolbar-section">
+      <button onclick={openLoadDialog} title="Load SVG from file">📂 Load</button>
       <button onclick={saveSVG} title="Save SVG to file">💾 Save</button>
       <button onclick={exportSVG} title="Copy SVG to clipboard">📋 Copy</button>
       <button onclick={clearCanvas} title="Clear all shapes">🗑️ Clear</button>
     </div>
   </header>
+
+  <!-- Hidden file input for loading SVG -->
+  <input
+    type="file"
+    accept=".svg"
+    bind:this={fileInput}
+    onchange={handleFileLoad}
+    style="display: none"
+  />
 
   <div class="main-content">
     <aside class="tool-palette">
