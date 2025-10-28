@@ -6,6 +6,7 @@
   import { saveSVGFile } from './utils/electron'
 
   let canvas: HTMLCanvasElement
+  let canvasContainer: HTMLElement
   let renderer: Renderer
   let toolManager: ToolManager
   let currentTool: ToolType = 'rect'
@@ -15,6 +16,18 @@
   let resizeHandle: HandleType | null = null
   let dragStart = { x: 0, y: 0 }
 
+  function resizeCanvas() {
+    if (!canvas || !canvasContainer) return
+
+    const rect = canvasContainer.getBoundingClientRect()
+    canvas.width = rect.width
+    canvas.height = rect.height
+
+    if (renderer) {
+      renderer.render()
+    }
+  }
+
   onMount(() => {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -22,7 +35,16 @@
     renderer = new Renderer(canvas, ctx)
     toolManager = new ToolManager()
     toolManager.setTool(currentTool)
-    renderer.render()
+
+    // Initial resize
+    resizeCanvas()
+
+    // Resize on window resize
+    window.addEventListener('resize', resizeCanvas)
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas)
+    }
   })
 
   function setTool(tool: ToolType) {
@@ -153,195 +175,183 @@
 </script>
 
 <div class="container">
-  <div class="toolbar">
-    <h2>Grapher - Phase 1 Prototype</h2>
+  <aside class="tool-palette">
+    <h2>Tools</h2>
 
-    <div class="tools">
+    <div class="tool-buttons">
       <button
         class:active={currentTool === 'select'}
         onclick={() => setTool('select')}
         title="Select Tool (V)"
       >
-        ✋ Select
+        <span class="icon">✋</span>
+        <span class="label">Select</span>
       </button>
       <button
         class:active={currentTool === 'rect'}
         onclick={() => setTool('rect')}
         title="Rectangle Tool (R)"
       >
-        ⬜ Rect
+        <span class="icon">⬜</span>
+        <span class="label">Rect</span>
       </button>
       <button
         class:active={currentTool === 'circle'}
         onclick={() => setTool('circle')}
         title="Circle Tool (C)"
       >
-        ⭕ Circle
+        <span class="icon">⭕</span>
+        <span class="label">Circle</span>
       </button>
       <button
         class:active={currentTool === 'line'}
         onclick={() => setTool('line')}
         title="Line Tool (L)"
       >
-        📏 Line
+        <span class="icon">📏</span>
+        <span class="label">Line</span>
       </button>
       <button
         class:active={currentTool === 'path'}
         onclick={() => setTool('path')}
         title="Path Tool (P)"
       >
-        🖊️ Path
+        <span class="icon">🖊️</span>
+        <span class="label">Path</span>
       </button>
     </div>
 
-    <div class="buttons">
-      <button onclick={saveSVG} title="Save SVG to file">💾 Save SVG</button>
-      <button onclick={exportSVG} title="Copy SVG to clipboard">📋 Copy SVG</button>
-      <button onclick={clearCanvas} title="Clear all shapes">🗑️ Clear All</button>
-    </div>
-  </div>
+    <div class="divider"></div>
 
-  <div class="canvas-container">
+    <div class="action-buttons">
+      <button onclick={saveSVG} title="Save SVG to file">
+        <span class="icon">💾</span>
+        <span class="label">Save</span>
+      </button>
+      <button onclick={exportSVG} title="Copy SVG to clipboard">
+        <span class="icon">📋</span>
+        <span class="label">Copy</span>
+      </button>
+      <button onclick={clearCanvas} title="Clear all shapes">
+        <span class="icon">🗑️</span>
+        <span class="label">Clear</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="canvas-area" bind:this={canvasContainer}>
     <canvas
       bind:this={canvas}
-      width="800"
-      height="600"
       onmousedown={handleMouseDown}
       onmousemove={handleMouseMove}
       onmouseup={handleMouseUp}
       onmouseleave={handleMouseUp}
     ></canvas>
-  </div>
-
-  <div class="instructions">
-    <h3>Instructions:</h3>
-    <ul>
-      <li><strong>Select Tool (✋)</strong>: Click to select, drag to move shapes</li>
-      <li><strong>Shape Tools (⬜⭕📏🖊️)</strong>: Click and drag to create shapes</li>
-      <li><strong>Save SVG (💾)</strong>: Save as .svg file to disk</li>
-      <li><strong>Copy SVG (📋)</strong>: Copy to clipboard & console output</li>
-      <li><strong>Clear All (🗑️)</strong>: Remove all shapes from canvas</li>
-    </ul>
-    <p><em>Current Tool: {currentTool.toUpperCase()}</em></p>
-  </div>
+  </main>
 </div>
 
 <style>
   .container {
     display: flex;
-    flex-direction: column;
     height: 100vh;
-    padding: 20px;
-    box-sizing: border-box;
+    width: 100vw;
+    overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding: 15px;
-    background: #f5f5f5;
-    border-radius: 8px;
-    gap: 20px;
-  }
-
-  .toolbar h2 {
     margin: 0;
-    font-size: 1.5rem;
-    flex-shrink: 0;
+    padding: 0;
   }
 
-  .tools {
+  .tool-palette {
+    width: 80px;
+    background: #2c2c2c;
+    color: #fff;
     display: flex;
-    gap: 5px;
-    flex: 1;
-    justify-content: center;
+    flex-direction: column;
+    padding: 8px 4px;
+    gap: 6px;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.15);
   }
 
-  .tools button {
-    padding: 8px 16px;
-    font-size: 14px;
-    background: white;
-    color: #333;
-    border: 2px solid #ddd;
-    border-radius: 4px;
+  .tool-palette h2 {
+    margin: 0 0 4px 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .tool-buttons,
+  .action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tool-palette button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 8px 4px;
+    background: #3a3a3a;
+    color: #ccc;
+    border: 2px solid transparent;
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.2s;
+    font-size: 10px;
+    margin: 0;
   }
 
-  .tools button:hover {
+  .tool-palette button .icon {
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .tool-palette button .label {
+    font-size: 9px;
+    font-weight: 500;
+  }
+
+  .tool-palette button:hover {
+    background: #4a4a4a;
     border-color: #2196F3;
-    background: #E3F2FD;
+    color: #fff;
   }
 
-  .tools button.active {
+  .tool-palette button.active {
     background: #2196F3;
-    color: white;
+    color: #fff;
     border-color: #1976D2;
   }
 
-  .buttons {
-    display: flex;
-    gap: 10px;
-    flex-shrink: 0;
+  .divider {
+    height: 1px;
+    background: #4a4a4a;
+    margin: 4px 0;
   }
 
-  .buttons button {
-    padding: 10px 20px;
-    font-size: 14px;
-    background: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .buttons button:hover {
-    background: #45a049;
-  }
-
-  .canvas-container {
+  .canvas-area {
     flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
-    background: #fafafa;
-    border-radius: 8px;
+    background: #f0f0f0;
     overflow: hidden;
+    margin: 0;
+    padding: 0;
   }
 
   canvas {
-    border: 2px solid #ddd;
+    width: 100%;
+    height: 100%;
+    border: none;
     background: white;
     cursor: crosshair;
-  }
-
-  .instructions {
-    margin-top: 20px;
-    padding: 15px;
-    background: #f5f5f5;
-    border-radius: 8px;
-  }
-
-  .instructions h3 {
-    margin-top: 0;
-  }
-
-  .instructions ul {
-    margin: 10px 0;
-    padding-left: 20px;
-  }
-
-  .instructions li {
-    margin: 5px 0;
-  }
-
-  .instructions p {
-    margin: 10px 0 0 0;
-    font-weight: 600;
-    color: #2196F3;
+    margin: 0;
+    display: block;
   }
 </style>

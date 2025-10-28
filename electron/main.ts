@@ -29,7 +29,8 @@ function createWindow() {
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
-    win.webContents.openDevTools()
+    // DevTools disabled for cleaner UI
+    // win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(process.env.DIST, 'index.html'))
   }
