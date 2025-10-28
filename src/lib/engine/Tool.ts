@@ -8,16 +8,17 @@ export interface ToolState {
   startX: number
   startY: number
   preview?: Shape
+  pathPoints?: { x: number; y: number }[]
 }
 
 export class ToolManager {
   private currentTool: ToolType = 'select'
-  private state: ToolState = { isDrawing: false, startX: 0, startY: 0 }
+  private state: ToolState = { isDrawing: false, startX: 0, startY: 0, pathPoints: [] }
   private shapeCounter = 0
 
   setTool(tool: ToolType) {
     this.currentTool = tool
-    this.state = { isDrawing: false, startX: 0, startY: 0 }
+    this.state = { isDrawing: false, startX: 0, startY: 0, pathPoints: [] }
   }
 
   getTool(): ToolType {
@@ -128,7 +129,12 @@ export class ToolManager {
 
       case 'path': {
         const path = this.state.preview as Path
-        path.props.d = `M ${startX} ${startY} L ${x} ${y}`
+        const points = this.state.pathPoints || []
+        if (points.length === 0) {
+          path.props.d = `M ${startX} ${startY} L ${x} ${y}`
+        } else {
+          path.props.d = this.generateSmoothPath([...points, { x, y }])
+        }
         break
       }
     }
@@ -157,8 +163,71 @@ export class ToolManager {
     return shape
   }
 
+  addPathPoint(x: number, y: number) {
+    if (this.currentTool !== 'path') return
+
+    if (!this.state.isDrawing) {
+      // First point - start drawing
+      this.startDrawing(x, y)
+      this.state.pathPoints = [{ x, y }]
+    } else {
+      // Add point to path
+      this.state.pathPoints = this.state.pathPoints || []
+      this.state.pathPoints.push({ x, y })
+
+      // Update preview with smooth curve
+      const path = this.state.preview as Path
+      path.props.d = this.generateSmoothPath(this.state.pathPoints)
+    }
+  }
+
+  finishPath(): Shape | null {
+    if (this.currentTool !== 'path' || !this.state.preview) return null
+
+    const shape = this.state.preview
+    this.state = { isDrawing: false, startX: 0, startY: 0, pathPoints: [] }
+
+    return shape
+  }
+
   cancelDrawing() {
-    this.state = { isDrawing: false, startX: 0, startY: 0 }
+    this.state = { isDrawing: false, startX: 0, startY: 0, pathPoints: [] }
+  }
+
+  private generateSmoothPath(points: { x: number; y: number }[]): string {
+    if (points.length < 2) {
+      return `M ${points[0].x} ${points[0].y}`
+    }
+
+    if (points.length === 2) {
+      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
+    }
+
+    // Generate smooth curve using quadratic bezier
+    let path = `M ${points[0].x} ${points[0].y}`
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const p0 = points[i - 1]
+      const p1 = points[i]
+      const p2 = points[i + 1]
+
+      // Control point for smooth curve
+      const cx = p1.x
+      const cy = p1.y
+
+      // End point is midpoint between current and next
+      const ex = (p1.x + p2.x) / 2
+      const ey = (p1.y + p2.y) / 2
+
+      path += ` Q ${cx} ${cy}, ${ex} ${ey}`
+    }
+
+    // Add final point
+    const lastPoint = points[points.length - 1]
+    const secondLastPoint = points[points.length - 2]
+    path += ` Q ${secondLastPoint.x} ${secondLastPoint.y}, ${lastPoint.x} ${lastPoint.y}`
+
+    return path
   }
 
   private getRandomColor(): string {

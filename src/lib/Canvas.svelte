@@ -82,8 +82,13 @@
       } else {
         renderer.selectShape(null)
       }
+    } else if (currentTool === 'path') {
+      // Path tool: add point on click
+      toolManager.addPathPoint(x, y)
+      const state = toolManager.getState()
+      renderer.setPreview(state.preview ?? null)
     } else {
-      // Drawing mode
+      // Drawing mode for other tools
       toolManager.startDrawing(x, y)
     }
   }
@@ -109,8 +114,15 @@
         renderer.moveShape(draggedShapeId, dx, dy)
         dragStart = { x, y }
       }
+    } else if (currentTool === 'path') {
+      // Path tool: update preview with current mouse position
+      const state = toolManager.getState()
+      if (state.isDrawing) {
+        toolManager.updateDrawing(x, y)
+        renderer.setPreview(state.preview ?? null)
+      }
     } else {
-      // Drawing preview (when not in select mode)
+      // Drawing preview for other tools
       const state = toolManager.getState()
       if (state.isDrawing) {
         toolManager.updateDrawing(x, y)
@@ -127,12 +139,35 @@
       isResizing = false
       draggedShapeId = null
       resizeHandle = null
+    } else if (currentTool === 'path') {
+      // Path tool: do nothing on mouse up (continue drawing)
     } else {
+      // Other tools: finish drawing on mouse up
       const shape = toolManager.finishDrawing()
       if (shape) {
         renderer.addShape(shape)
         renderer.selectShape(shape.props.id)
       }
+      renderer.setPreview(null)
+    }
+  }
+
+  function handleDblClick(e: MouseEvent) {
+    if (!renderer || !toolManager || currentTool !== 'path') return
+
+    // Double click to finish path
+    const shape = toolManager.finishPath()
+    if (shape) {
+      renderer.addShape(shape)
+      renderer.selectShape(shape.props.id)
+    }
+    renderer.setPreview(null)
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && currentTool === 'path') {
+      // ESC to cancel path drawing
+      toolManager.cancelDrawing()
       renderer.setPreview(null)
     }
   }
@@ -246,9 +281,12 @@
       onmousemove={handleMouseMove}
       onmouseup={handleMouseUp}
       onmouseleave={handleMouseUp}
+      ondblclick={handleDblClick}
     ></canvas>
   </main>
 </div>
+
+<svelte:window onkeydown={handleKeyDown} />
 
 <style>
   .container {
