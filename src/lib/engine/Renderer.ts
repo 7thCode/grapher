@@ -78,6 +78,21 @@ export class Renderer {
     return this.shapes.find((s) => s.props.id === this.selectedId) || null
   }
 
+  updateShapeProperties(id: string, props: Partial<{
+    stroke: string
+    strokeWidth: number
+    fill: string
+  }>) {
+    const shape = this.shapes.find((s) => s.props.id === id)
+    if (!shape) return
+
+    if (props.stroke !== undefined) shape.props.stroke = props.stroke
+    if (props.strokeWidth !== undefined) shape.props.strokeWidth = props.strokeWidth
+    if (props.fill !== undefined) shape.props.fill = props.fill
+
+    this.render()
+  }
+
   getShapeAt(x: number, y: number): Shape | null {
     // Reverse iteration to prioritize top shapes
     for (let i = this.shapes.length - 1; i >= 0; i--) {

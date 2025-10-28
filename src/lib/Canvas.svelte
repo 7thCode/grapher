@@ -16,6 +16,50 @@
   let resizeHandle: HandleType | null = null
   let dragStart = { x: 0, y: 0 }
 
+  // Property editing state
+  let selectedStroke = '#333333'
+  let selectedStrokeWidth = 2
+  let selectedFill = '#ff6b6b'
+
+  $: {
+    // Update property controls when selection changes
+    if (renderer) {
+      const selected = renderer.getSelectedShape()
+      if (selected) {
+        selectedStroke = selected.props.stroke || '#333333'
+        selectedStrokeWidth = selected.props.strokeWidth || 2
+        selectedFill = selected.props.fill || '#ff6b6b'
+      }
+    }
+  }
+
+  function updateStroke(color: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      renderer.updateShapeProperties(selected.props.id, { stroke: color })
+      selectedStroke = color
+    }
+  }
+
+  function updateStrokeWidth(width: number) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      renderer.updateShapeProperties(selected.props.id, { strokeWidth: width })
+      selectedStrokeWidth = width
+    }
+  }
+
+  function updateFill(color: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      renderer.updateShapeProperties(selected.props.id, { fill: color })
+      selectedFill = color
+    }
+  }
+
   function resizeCanvas() {
     if (!canvas || !canvasContainer) return
 
@@ -209,8 +253,52 @@
   }
 </script>
 
-<div class="container">
-  <aside class="tool-palette">
+<div class="app-container">
+  <header class="top-toolbar">
+    <div class="toolbar-section">
+      <label class="toolbar-label">
+        <span>線色</span>
+        <input
+          type="color"
+          value={selectedStroke}
+          oninput={(e) => updateStroke(e.currentTarget.value)}
+          disabled={!renderer?.getSelectedShape()}
+        />
+      </label>
+
+      <label class="toolbar-label">
+        <span>線幅</span>
+        <input
+          type="range"
+          min="1"
+          max="20"
+          value={selectedStrokeWidth}
+          oninput={(e) => updateStrokeWidth(Number(e.currentTarget.value))}
+          disabled={!renderer?.getSelectedShape()}
+        />
+        <span class="value-display">{selectedStrokeWidth}px</span>
+      </label>
+
+      <label class="toolbar-label">
+        <span>塗色</span>
+        <input
+          type="color"
+          value={selectedFill}
+          oninput={(e) => updateFill(e.currentTarget.value)}
+          disabled={!renderer?.getSelectedShape()}
+        />
+      </label>
+    </div>
+
+    <div class="toolbar-section">
+      <button onclick={saveSVG} title="Save SVG to file">💾 Save</button>
+      <button onclick={exportSVG} title="Copy SVG to clipboard">📋 Copy</button>
+      <button onclick={clearCanvas} title="Clear all shapes">🗑️ Clear</button>
+    </div>
+  </header>
+
+  <div class="main-content">
+    <aside class="tool-palette">
     <h2>Tools</h2>
 
     <div class="tool-buttons">
@@ -256,25 +344,10 @@
       </button>
     </div>
 
-    <div class="divider"></div>
-
-    <div class="action-buttons">
-      <button onclick={saveSVG} title="Save SVG to file">
-        <span class="icon">💾</span>
-        <span class="label">Save</span>
-      </button>
-      <button onclick={exportSVG} title="Copy SVG to clipboard">
-        <span class="icon">📋</span>
-        <span class="label">Copy</span>
-      </button>
-      <button onclick={clearCanvas} title="Clear all shapes">
-        <span class="icon">🗑️</span>
-        <span class="label">Clear</span>
-      </button>
     </div>
-  </aside>
+    </aside>
 
-  <main class="canvas-area" bind:this={canvasContainer}>
+    <main class="canvas-area" bind:this={canvasContainer}>
     <canvas
       bind:this={canvas}
       onmousedown={handleMouseDown}
@@ -283,20 +356,124 @@
       onmouseleave={handleMouseUp}
       ondblclick={handleDblClick}
     ></canvas>
-  </main>
+    </main>
+  </div>
 </div>
 
 <svelte:window onkeydown={handleKeyDown} />
 
 <style>
-  .container {
+  .app-container {
     display: flex;
+    flex-direction: column;
     height: 100vh;
     width: 100vw;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     margin: 0;
     padding: 0;
+  }
+
+  .top-toolbar {
+    height: 50px;
+    background: #2c2c2c;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    gap: 16px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  .toolbar-section {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .toolbar-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #ccc;
+  }
+
+  .toolbar-label input[type="color"] {
+    width: 40px;
+    height: 28px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+    background: transparent;
+  }
+
+  .toolbar-label input[type="color"]:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .toolbar-label input[type="range"] {
+    width: 120px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #555;
+    outline: none;
+    border-radius: 2px;
+  }
+
+  .toolbar-label input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #2196F3;
+    cursor: pointer;
+    border-radius: 50%;
+  }
+
+  .toolbar-label input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #2196F3;
+    cursor: pointer;
+    border-radius: 50%;
+    border: none;
+  }
+
+  .toolbar-label input[type="range"]:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .toolbar-label .value-display {
+    min-width: 40px;
+    font-size: 12px;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .toolbar-section button {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .toolbar-section button:hover {
+    background: #45a049;
+  }
+
+  .main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
   }
 
   .tool-palette {
