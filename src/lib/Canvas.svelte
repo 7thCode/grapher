@@ -599,12 +599,6 @@
       </label>
     </div>
 
-    <div class="toolbar-section">
-      <button onclick={openLoadDialog} title="Load SVG from file">📂 Load</button>
-      <button onclick={saveSVG} title="Save SVG to file">💾 Save</button>
-      <button onclick={exportSVG} title="Copy SVG to clipboard">📋 Copy</button>
-      <button onclick={clearCanvas} title="Clear all shapes">🗑️ Clear</button>
-    </div>
   </header>
 
   <!-- Hidden file input for loading SVG -->
@@ -697,7 +691,6 @@
     color: #fff;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 0 16px;
     gap: 16px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -770,21 +763,6 @@
     font-size: 12px;
     color: #fff;
     font-weight: 600;
-  }
-
-  .toolbar-section button {
-    padding: 6px 12px;
-    font-size: 12px;
-    background: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .toolbar-section button:hover {
-    background: #45a049;
   }
 
   .main-content {
