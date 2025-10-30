@@ -73,6 +73,12 @@ export class Renderer {
     this.render()
   }
 
+  rotateShape(mouseX: number, mouseY: number) {
+    if (!this.transformControls) return
+    this.transformControls.rotate(mouseX, mouseY)
+    this.render()
+  }
+
   getSelectedShape(): Shape | null {
     if (!this.selectedId) return null
     return this.shapes.find((s) => s.props.id === this.selectedId) || null

@@ -15,6 +15,7 @@
   let currentTool: ToolType = 'rect'
   let isDragging = false
   let isResizing = false
+  let isRotating = false
   let draggedShapeId: string | null = null
   let resizeHandle: HandleType | null = null
   let dragStart = { x: 0, y: 0 }
@@ -94,6 +95,49 @@
     // Resize on window resize
     window.addEventListener('resize', resizeCanvas)
 
+    // Listen for menu events from Electron
+    try {
+      console.log('Checking for Electron environment...')
+
+      // Access ipcRenderer exposed via preload script
+      const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
+
+      if (ipcRenderer) {
+        console.log('Setting up IPC listeners...')
+
+        ipcRenderer.on('menu-load', () => {
+          console.log('Received menu-load event')
+          openLoadDialog()
+        })
+        ipcRenderer.on('menu-save', () => {
+          console.log('Received menu-save event')
+          saveSVG()
+        })
+        ipcRenderer.on('menu-copy', () => {
+          console.log('Received menu-copy event')
+          copyShape()
+        })
+        ipcRenderer.on('menu-paste', () => {
+          console.log('Received menu-paste event')
+          pasteShape()
+        })
+
+        console.log('IPC listeners registered successfully')
+
+        return () => {
+          window.removeEventListener('resize', resizeCanvas)
+          ipcRenderer.removeAllListeners('menu-load')
+          ipcRenderer.removeAllListeners('menu-save')
+          ipcRenderer.removeAllListeners('menu-copy')
+          ipcRenderer.removeAllListeners('menu-paste')
+        }
+      } else {
+        console.log('ipcRenderer not available - not running in Electron')
+      }
+    } catch (err) {
+      console.log('Error setting up IPC:', err)
+    }
+
     return () => {
       window.removeEventListener('resize', resizeCanvas)
     }
@@ -116,10 +160,14 @@
     const y = e.clientY - rect.top
 
     if (currentTool === 'select') {
-      // Check if clicking on a resize handle first
+      // Check if clicking on a resize/rotate handle first
       const handle = renderer.getHandleAt(x, y)
       if (handle) {
-        isResizing = true
+        if (handle === 'rotate') {
+          isRotating = true
+        } else {
+          isResizing = true
+        }
         resizeHandle = handle
         dragStart = { x, y }
         return
@@ -156,7 +204,10 @@
     const y = e.clientY - rect.top
 
     if (currentTool === 'select') {
-      if (isResizing && resizeHandle) {
+      if (isRotating) {
+        // Rotating shape
+        renderer.rotateShape(x, y)
+      } else if (isResizing && resizeHandle) {
         // Resizing shape
         const dx = x - dragStart.x
         const dy = y - dragStart.y
@@ -192,6 +243,7 @@
     if (currentTool === 'select') {
       isDragging = false
       isResizing = false
+      isRotating = false
       draggedShapeId = null
       resizeHandle = null
     } else if (currentTool === 'path') {
@@ -341,6 +393,7 @@
   }
 
   function openLoadDialog() {
+    console.log('openLoadDialog called, fileInput:', fileInput)
     fileInput?.click()
   }
 

@@ -11,9 +11,9 @@ interface SaveSVGResult {
 export async function saveSVGFile(svgContent: string): Promise<SaveSVGResult> {
   // Check if running in Electron environment
   try {
-    // vite-plugin-electron-renderer enables direct require
-    if (typeof window !== 'undefined' && typeof (window as any).require === 'function') {
-      const { ipcRenderer } = (window as any).require('electron')
+    // Access ipcRenderer exposed via preload script (contextBridge)
+    if (typeof window !== 'undefined' && (window as any).ipcRenderer) {
+      const ipcRenderer = (window as any).ipcRenderer
       console.log('Electron IPC available, invoking save-svg')
       const result = await ipcRenderer.invoke('save-svg', svgContent)
       return result

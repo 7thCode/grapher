@@ -6,6 +6,7 @@ export interface ShapeProps {
   fill?: string
   stroke?: string
   strokeWidth?: number
+  rotation?: number // Rotation angle in degrees
 }
 
 export interface RectProps extends ShapeProps {
@@ -17,7 +18,18 @@ export class Rect {
   constructor(public props: RectProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1 } = this.props
+    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1, rotation = 0 } = this.props
+
+    ctx.save()
+
+    // Apply rotation around center
+    if (rotation !== 0) {
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
 
     ctx.fillStyle = fill
     ctx.fillRect(x, y, width, height)
@@ -27,6 +39,8 @@ export class Rect {
       ctx.lineWidth = strokeWidth
       ctx.strokeRect(x, y, width, height)
     }
+
+    ctx.restore()
   }
 
   containsPoint(px: number, py: number): boolean {
@@ -35,9 +49,10 @@ export class Rect {
   }
 
   toSVG(): string {
-    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1 } = this.props
+    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
-    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" ${strokeAttr} />`
+    const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${x + width/2} ${y + height/2})"` : ''
+    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" ${strokeAttr} ${transformAttr} />`
   }
 
   getBounds() {
@@ -57,7 +72,16 @@ export class Circle {
   constructor(public props: CircleProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1 } = this.props
+    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1, rotation = 0 } = this.props
+
+    ctx.save()
+
+    // Apply rotation around center (circles don't visually change, but we keep for consistency)
+    if (rotation !== 0) {
+      ctx.translate(cx, cy)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-cx, -cy)
+    }
 
     ctx.beginPath()
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -72,6 +96,8 @@ export class Circle {
       ctx.lineWidth = strokeWidth
       ctx.stroke()
     }
+
+    ctx.restore()
   }
 
   containsPoint(px: number, py: number): boolean {
@@ -82,9 +108,10 @@ export class Circle {
   }
 
   toSVG(): string {
-    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1 } = this.props
+    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" ${strokeAttr} />`
+    const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${cx} ${cy})"` : ''
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" ${strokeAttr} ${transformAttr} />`
   }
 
   getBounds() {
@@ -105,7 +132,18 @@ export class Line {
   constructor(public props: LineProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2 } = this.props
+    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2, rotation = 0 } = this.props
+
+    ctx.save()
+
+    // Apply rotation around center
+    if (rotation !== 0) {
+      const centerX = (x1 + x2) / 2
+      const centerY = (y1 + y2) / 2
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
 
     ctx.beginPath()
     ctx.moveTo(x1, y1)
@@ -113,6 +151,8 @@ export class Line {
     ctx.strokeStyle = stroke
     ctx.lineWidth = strokeWidth
     ctx.stroke()
+
+    ctx.restore()
   }
 
   containsPoint(px: number, py: number): boolean {
@@ -150,8 +190,9 @@ export class Line {
   }
 
   toSVG(): string {
-    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2 } = this.props
-    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${strokeWidth}" />`
+    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2, rotation = 0 } = this.props
+    const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${(x1+x2)/2} ${(y1+y2)/2})"` : ''
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${strokeWidth}" ${transformAttr} />`
   }
 
   getBounds() {
@@ -175,7 +216,19 @@ export class Path {
   constructor(public props: PathProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { d, fill, stroke = '#9C27B0', strokeWidth = 2 } = this.props
+    const { d, fill, stroke = '#9C27B0', strokeWidth = 2, rotation = 0 } = this.props
+
+    ctx.save()
+
+    // Apply rotation around center
+    if (rotation !== 0) {
+      const bounds = this.getBounds()
+      const centerX = bounds.x + bounds.width / 2
+      const centerY = bounds.y + bounds.height / 2
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
 
     const path = new Path2D(d)
 
@@ -189,6 +242,8 @@ export class Path {
       ctx.lineWidth = strokeWidth
       ctx.stroke(path)
     }
+
+    ctx.restore()
   }
 
   containsPoint(px: number, py: number): boolean {
@@ -211,10 +266,14 @@ export class Path {
   }
 
   toSVG(): string {
-    const { d, fill, stroke = '#9C27B0', strokeWidth = 2 } = this.props
+    const { d, fill, stroke = '#9C27B0', strokeWidth = 2, rotation = 0 } = this.props
     const fillAttr = fill ? `fill="${fill}"` : 'fill="none"'
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
-    return `<path d="${d}" ${fillAttr} ${strokeAttr} />`
+    const bounds = this.getBounds()
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+    const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${centerX} ${centerY})"` : ''
+    return `<path d="${d}" ${fillAttr} ${strokeAttr} ${transformAttr} />`
   }
 
   getBounds() {

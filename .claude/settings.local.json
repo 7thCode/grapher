@@ -13,7 +13,8 @@
       "mcp__serena__write_memory",
       "Bash(npm run dev:*)",
       "Bash(npm run check:*)",
-      "mcp__serena__read_memory"
+      "mcp__serena__read_memory",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

@@ -11,6 +11,22 @@ export default defineConfig({
       {
         entry: 'electron/main.ts',
       },
+      {
+        entry: 'electron/preload.ts',
+        onstart(args) {
+          // Don't reload app when preload changes
+          args.reload()
+        },
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                format: 'cjs', // Use CommonJS format for preload script
+              },
+            },
+          },
+        },
+      },
     ]),
     renderer(),
   ],

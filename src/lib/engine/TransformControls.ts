@@ -1,7 +1,7 @@
 import type { Shape } from './Shape'
 import { Rect, Circle, Line } from './Shape'
 
-export type HandleType = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
+export type HandleType = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw' | 'rotate'
 
 export interface Handle {
   type: HandleType
@@ -23,6 +23,9 @@ export class TransformControls {
     const { x, y, width, height } = bounds
     const hs = this.handleSize
 
+    // Rotation handle offset
+    const rotateOffset = 25
+
     this.handles = [
       { type: 'nw', x: x - hs / 2, y: y - hs / 2, size: hs },
       { type: 'n', x: x + width / 2 - hs / 2, y: y - hs / 2, size: hs },
@@ -32,6 +35,8 @@ export class TransformControls {
       { type: 's', x: x + width / 2 - hs / 2, y: y + height - hs / 2, size: hs },
       { type: 'sw', x: x - hs / 2, y: y + height - hs / 2, size: hs },
       { type: 'w', x: x - hs / 2, y: y + height / 2 - hs / 2, size: hs },
+      // Rotation handle (above center top)
+      { type: 'rotate', x: x + width / 2 - hs / 2, y: y - rotateOffset - hs / 2, size: hs },
     ]
   }
 
@@ -39,24 +44,59 @@ export class TransformControls {
     this.updateHandles()
 
     for (const handle of this.handles) {
-      ctx.fillStyle = 'white'
-      ctx.strokeStyle = '#2196F3'
-      ctx.lineWidth = 2
+      if (handle.type === 'rotate') {
+        // Render rotation handle as a circle
+        ctx.fillStyle = 'white'
+        ctx.strokeStyle = '#4CAF50'
+        ctx.lineWidth = 2
 
-      ctx.fillRect(handle.x, handle.y, handle.size, handle.size)
-      ctx.strokeRect(handle.x, handle.y, handle.size, handle.size)
+        const centerX = handle.x + handle.size / 2
+        const centerY = handle.y + handle.size / 2
+        ctx.beginPath()
+        ctx.arc(centerX, centerY, handle.size / 2, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+
+        // Draw rotation icon (arrow curve)
+        ctx.strokeStyle = '#4CAF50'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.arc(centerX, centerY, 3, 0.3 * Math.PI, 1.7 * Math.PI)
+        ctx.stroke()
+      } else {
+        // Regular resize handles
+        ctx.fillStyle = 'white'
+        ctx.strokeStyle = '#2196F3'
+        ctx.lineWidth = 2
+
+        ctx.fillRect(handle.x, handle.y, handle.size, handle.size)
+        ctx.strokeRect(handle.x, handle.y, handle.size, handle.size)
+      }
     }
   }
 
   getHandleAt(x: number, y: number): HandleType | null {
     for (const handle of this.handles) {
-      if (
-        x >= handle.x &&
-        x <= handle.x + handle.size &&
-        y >= handle.y &&
-        y <= handle.y + handle.size
-      ) {
-        return handle.type
+      if (handle.type === 'rotate') {
+        // Circle hit detection for rotation handle
+        const centerX = handle.x + handle.size / 2
+        const centerY = handle.y + handle.size / 2
+        const dx = x - centerX
+        const dy = y - centerY
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        if (distance <= handle.size / 2 + 2) {
+          return handle.type
+        }
+      } else {
+        // Rectangle hit detection for resize handles
+        if (
+          x >= handle.x &&
+          x <= handle.x + handle.size &&
+          y >= handle.y &&
+          y <= handle.y + handle.size
+        ) {
+          return handle.type
+        }
       }
     }
     return null
@@ -149,6 +189,19 @@ export class TransformControls {
     }
   }
 
+  rotate(mouseX: number, mouseY: number) {
+    const bounds = this.shape.getBounds()
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+
+    // Calculate angle from center to mouse
+    const angle = Math.atan2(mouseY - centerY, mouseX - centerX)
+    const degrees = (angle * 180) / Math.PI + 90 // Offset by 90 degrees so 0 is pointing up
+
+    // Update shape rotation
+    this.shape.props.rotation = Math.round(degrees)
+  }
+
   getCursor(handleType: HandleType): string {
     const cursors: Record<HandleType, string> = {
       n: 'ns-resize',
@@ -159,6 +212,7 @@ export class TransformControls {
       sw: 'nesw-resize',
       w: 'ew-resize',
       nw: 'nwse-resize',
+      rotate: 'grab',
     }
     return cursors[handleType]
   }
