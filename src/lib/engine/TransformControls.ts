@@ -43,6 +43,20 @@ export class TransformControls {
   render(ctx: CanvasRenderingContext2D) {
     this.updateHandles()
 
+    const bounds = this.shape.getBounds()
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+    const rotation = this.shape.props.rotation || 0
+
+    ctx.save()
+
+    // Apply rotation around shape center
+    if (rotation !== 0) {
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
+
     for (const handle of this.handles) {
       if (handle.type === 'rotate') {
         // Render rotation handle as a circle
@@ -50,10 +64,10 @@ export class TransformControls {
         ctx.strokeStyle = '#4CAF50'
         ctx.lineWidth = 2
 
-        const centerX = handle.x + handle.size / 2
-        const centerY = handle.y + handle.size / 2
+        const hCenterX = handle.x + handle.size / 2
+        const hCenterY = handle.y + handle.size / 2
         ctx.beginPath()
-        ctx.arc(centerX, centerY, handle.size / 2, 0, Math.PI * 2)
+        ctx.arc(hCenterX, hCenterY, handle.size / 2, 0, Math.PI * 2)
         ctx.fill()
         ctx.stroke()
 
@@ -61,7 +75,7 @@ export class TransformControls {
         ctx.strokeStyle = '#4CAF50'
         ctx.lineWidth = 1.5
         ctx.beginPath()
-        ctx.arc(centerX, centerY, 3, 0.3 * Math.PI, 1.7 * Math.PI)
+        ctx.arc(hCenterX, hCenterY, 3, 0.3 * Math.PI, 1.7 * Math.PI)
         ctx.stroke()
       } else {
         // Regular resize handles
@@ -73,16 +87,35 @@ export class TransformControls {
         ctx.strokeRect(handle.x, handle.y, handle.size, handle.size)
       }
     }
+
+    ctx.restore()
   }
 
   getHandleAt(x: number, y: number): HandleType | null {
+    const bounds = this.shape.getBounds()
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+    const rotation = this.shape.props.rotation || 0
+
+    // Transform mouse coordinates to unrotated space
+    let transformedX = x
+    let transformedY = y
+
+    if (rotation !== 0) {
+      const angle = (-rotation * Math.PI) / 180 // Negative for inverse rotation
+      const dx = x - centerX
+      const dy = y - centerY
+      transformedX = centerX + dx * Math.cos(angle) - dy * Math.sin(angle)
+      transformedY = centerY + dx * Math.sin(angle) + dy * Math.cos(angle)
+    }
+
     for (const handle of this.handles) {
       if (handle.type === 'rotate') {
         // Circle hit detection for rotation handle
-        const centerX = handle.x + handle.size / 2
-        const centerY = handle.y + handle.size / 2
-        const dx = x - centerX
-        const dy = y - centerY
+        const hCenterX = handle.x + handle.size / 2
+        const hCenterY = handle.y + handle.size / 2
+        const dx = transformedX - hCenterX
+        const dy = transformedY - hCenterY
         const distance = Math.sqrt(dx * dx + dy * dy)
         if (distance <= handle.size / 2 + 2) {
           return handle.type
@@ -90,10 +123,10 @@ export class TransformControls {
       } else {
         // Rectangle hit detection for resize handles
         if (
-          x >= handle.x &&
-          x <= handle.x + handle.size &&
-          y >= handle.y &&
-          y <= handle.y + handle.size
+          transformedX >= handle.x &&
+          transformedX <= handle.x + handle.size &&
+          transformedY >= handle.y &&
+          transformedY <= handle.y + handle.size
         ) {
           return handle.type
         }

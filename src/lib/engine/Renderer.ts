@@ -147,12 +147,26 @@ export class Renderer {
 
   private drawSelectionBox(shape: Shape) {
     const bounds = shape.getBounds()
+    const rotation = shape.props.rotation || 0
+
+    this.ctx.save()
+
+    // Apply rotation around shape center
+    if (rotation !== 0) {
+      const centerX = bounds.x + bounds.width / 2
+      const centerY = bounds.y + bounds.height / 2
+      this.ctx.translate(centerX, centerY)
+      this.ctx.rotate((rotation * Math.PI) / 180)
+      this.ctx.translate(-centerX, -centerY)
+    }
 
     this.ctx.strokeStyle = '#2196F3'
     this.ctx.lineWidth = 2
     this.ctx.setLineDash([5, 5])
     this.ctx.strokeRect(bounds.x - 2, bounds.y - 2, bounds.width + 4, bounds.height + 4)
     this.ctx.setLineDash([])
+
+    this.ctx.restore()
   }
 
   exportSVG(): string {
