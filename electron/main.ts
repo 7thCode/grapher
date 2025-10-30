@@ -21,15 +21,15 @@ function createMenu() {
       label: 'File',
       submenu: [
         {
-          label: 'Load SVG...',
+          label: 'Load...',
           accelerator: 'CmdOrCtrl+O',
           click: () => {
-            console.log('Load SVG menu clicked, sending menu-load event')
+            console.log('Load menu clicked, sending menu-load event')
             win?.webContents.send('menu-load')
           }
         },
         {
-          label: 'Save SVG...',
+          label: 'Save...',
           accelerator: 'CmdOrCtrl+S',
           click: () => {
             win?.webContents.send('menu-save')
