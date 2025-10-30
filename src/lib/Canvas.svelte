@@ -392,8 +392,31 @@
     shapes.forEach((s) => renderer.removeShape(s.props.id))
   }
 
-  function openLoadDialog() {
-    console.log('openLoadDialog called, fileInput:', fileInput)
+  async function openLoadDialog() {
+    console.log('openLoadDialog called')
+
+    // Try Electron IPC first
+    const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
+
+    if (ipcRenderer) {
+      try {
+        console.log('Using Electron file dialog')
+        const result = await ipcRenderer.invoke('load-svg')
+
+        if (result.success && result.content) {
+          loadSVG(result.content)
+          console.log('SVG loaded from:', result.filePath)
+        } else if (!result.canceled) {
+          alert('Failed to load SVG file')
+        }
+        return
+      } catch (err) {
+        console.error('Error loading via IPC:', err)
+      }
+    }
+
+    // Fallback to browser file input
+    console.log('Using browser file input, fileInput:', fileInput)
     fileInput?.click()
   }
 
@@ -410,6 +433,18 @@
       console.error('Failed to load SVG:', err)
       alert('Failed to load SVG file')
     }
+  }
+
+  function parseRotation(element: Element): number | undefined {
+    const transform = element.getAttribute('transform')
+    if (!transform) return undefined
+
+    const rotateMatch = transform.match(/rotate\(([^)]+)\)/)
+    if (rotateMatch) {
+      const parts = rotateMatch[1].split(/\s+/)
+      return parseFloat(parts[0])
+    }
+    return undefined
   }
 
   function loadSVG(svgString: string) {
@@ -433,6 +468,7 @@
       const fill = rect.getAttribute('fill') || '#4CAF50'
       const stroke = rect.getAttribute('stroke') || undefined
       const strokeWidth = parseFloat(rect.getAttribute('stroke-width') || '1')
+      const rotation = parseRotation(rect)
 
       const shape = new Rect({
         id: `rect-${Date.now()}-${Math.random()}`,
@@ -442,7 +478,8 @@
         height,
         fill,
         stroke,
-        strokeWidth
+        strokeWidth,
+        rotation
       })
       renderer.addShape(shape)
     })
@@ -456,6 +493,7 @@
       const fill = circle.getAttribute('fill') || '#4CAF50'
       const stroke = circle.getAttribute('stroke') || undefined
       const strokeWidth = parseFloat(circle.getAttribute('stroke-width') || '1')
+      const rotation = parseRotation(circle)
 
       const shape = new Circle({
         id: `circle-${Date.now()}-${Math.random()}`,
@@ -466,7 +504,8 @@
         r,
         fill,
         stroke,
-        strokeWidth
+        strokeWidth,
+        rotation
       })
       renderer.addShape(shape)
     })
@@ -480,6 +519,7 @@
       const y2 = parseFloat(line.getAttribute('y2') || '0')
       const stroke = line.getAttribute('stroke') || '#333'
       const strokeWidth = parseFloat(line.getAttribute('stroke-width') || '2')
+      const rotation = parseRotation(line)
 
       const shape = new Line({
         id: `line-${Date.now()}-${Math.random()}`,
@@ -490,7 +530,8 @@
         x2,
         y2,
         stroke,
-        strokeWidth
+        strokeWidth,
+        rotation
       })
       renderer.addShape(shape)
     })
@@ -502,6 +543,7 @@
       const stroke = path.getAttribute('stroke') || '#333'
       const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
       const fill = path.getAttribute('fill') || 'none'
+      const rotation = parseRotation(path)
 
       const shape = new Path({
         id: `path-${Date.now()}-${Math.random()}`,
@@ -510,7 +552,8 @@
         d,
         stroke,
         strokeWidth,
-        fill: fill === 'none' ? undefined : fill
+        fill: fill === 'none' ? undefined : fill,
+        rotation
       })
       renderer.addShape(shape)
     })
