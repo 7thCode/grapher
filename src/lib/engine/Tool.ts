@@ -1,7 +1,7 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line, Path } from './Shape'
+import { Rect, Circle, Line, Path, TextBox } from './Shape'
 
-export type ToolType = 'select' | 'rect' | 'circle' | 'line' | 'path'
+export type ToolType = 'select' | 'rect' | 'circle' | 'line' | 'path' | 'text'
 
 export interface ToolState {
   isDrawing: boolean
@@ -91,6 +91,22 @@ export class ToolManager {
           strokeWidth: 3
         })
         break
+
+      case 'text':
+        this.state.preview = new TextBox({
+          id,
+          x,
+          y,
+          width: 0,
+          height: 0,
+          text: 'Text',
+          fontSize: 16,
+          fontColor: '#000000',
+          fontFamily: 'Arial',
+          fontWeight: 'normal',
+          fontStyle: 'normal'
+        })
+        break
     }
   }
 
@@ -137,6 +153,17 @@ export class ToolManager {
         }
         break
       }
+
+      case 'text': {
+        const textBox = this.state.preview as TextBox
+        const width = x - startX
+        const height = y - startY
+        textBox.props.x = width < 0 ? x : startX
+        textBox.props.y = height < 0 ? y : startY
+        textBox.props.width = Math.abs(width)
+        textBox.props.height = Math.abs(height)
+        break
+      }
     }
   }
 
@@ -158,6 +185,8 @@ export class ToolManager {
       const dy = shape.props.y2 - shape.props.y1
       const length = Math.sqrt(dx * dx + dy * dy)
       if (length < 5) return null
+    } else if (shape instanceof TextBox) {
+      if (shape.props.width < 50 || shape.props.height < 30) return null
     }
 
     return shape

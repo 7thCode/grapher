@@ -1,5 +1,5 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line } from './Shape'
+import { Rect, Circle, Line, TextBox } from './Shape'
 
 export type HandleType = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw' | 'rotate'
 
@@ -142,6 +142,8 @@ export class TransformControls {
       this.resizeCircle(handleType, dx, dy)
     } else if (this.shape instanceof Line) {
       this.resizeLine(handleType, dx, dy)
+    } else if (this.shape instanceof TextBox) {
+      this.resizeTextBox(handleType, dx, dy)
     }
   }
 
@@ -219,6 +221,56 @@ export class TransformControls {
       // Resize from end point
       line.props.x2 = x2 + dx
       line.props.y2 = y2 + dy
+    }
+  }
+
+  private resizeTextBox(handleType: HandleType, dx: number, dy: number) {
+    const textBox = this.shape as TextBox
+    const { x, y, width, height } = textBox.props
+
+    switch (handleType) {
+      case 'nw':
+        textBox.props.x = x + dx
+        textBox.props.y = y + dy
+        textBox.props.width = width - dx
+        textBox.props.height = height - dy
+        break
+      case 'n':
+        textBox.props.y = y + dy
+        textBox.props.height = height - dy
+        break
+      case 'ne':
+        textBox.props.y = y + dy
+        textBox.props.width = width + dx
+        textBox.props.height = height - dy
+        break
+      case 'e':
+        textBox.props.width = width + dx
+        break
+      case 'se':
+        textBox.props.width = width + dx
+        textBox.props.height = height + dy
+        break
+      case 's':
+        textBox.props.height = height + dy
+        break
+      case 'sw':
+        textBox.props.x = x + dx
+        textBox.props.width = width - dx
+        textBox.props.height = height + dy
+        break
+      case 'w':
+        textBox.props.x = x + dx
+        textBox.props.width = width - dx
+        break
+    }
+
+    // Prevent negative or too small dimensions
+    if (textBox.props.width < 50) {
+      textBox.props.width = 50
+    }
+    if (textBox.props.height < 30) {
+      textBox.props.height = 30
     }
   }
 

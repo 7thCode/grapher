@@ -5,7 +5,7 @@
   import type { HandleType } from './engine/TransformControls'
   import { saveSVGFile } from './utils/electron'
   import type { Shape } from './engine/Shape'
-  import { Rect, Circle, Line, Path } from './engine/Shape'
+  import { Rect, Circle, Line, Path, TextBox } from './engine/Shape'
 
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
@@ -28,6 +28,11 @@
 
   // Clipboard for copy/paste
   let clipboardShape: Shape | null = null
+
+  // Text editing state
+  let isEditingText = false
+  let editingTextBox: TextBox | null = null
+  let textEditorDiv: HTMLDivElement | null = null
 
   $: {
     // Update property controls when selection changes
@@ -190,6 +195,9 @@
       toolManager.addPathPoint(x, y)
       const state = toolManager.getState()
       renderer.setPreview(state.preview ?? null)
+    } else if (currentTool === 'text') {
+      // Text tool: start drawing text box
+      toolManager.startDrawing(x, y)
     } else {
       // Drawing mode for other tools
       toolManager.startDrawing(x, y)
@@ -227,6 +235,13 @@
         toolManager.updateDrawing(x, y)
         renderer.setPreview(state.preview ?? null)
       }
+    } else if (currentTool === 'text') {
+      // Text tool: update text box preview
+      const state = toolManager.getState()
+      if (state.isDrawing) {
+        toolManager.updateDrawing(x, y)
+        renderer.setPreview(state.preview ?? null)
+      }
     } else {
       // Drawing preview for other tools
       const state = toolManager.getState()
@@ -248,6 +263,17 @@
       resizeHandle = null
     } else if (currentTool === 'path') {
       // Path tool: do nothing on mouse up (continue drawing)
+    } else if (currentTool === 'text') {
+      // Text tool: finish drawing text box
+      const shape = toolManager.finishDrawing()
+      if (shape && shape instanceof TextBox) {
+        renderer.addShape(shape)
+        renderer.setPreview(null)
+        // Immediately start editing the newly created text box
+        startTextEditing(shape)
+      } else {
+        renderer.setPreview(null)
+      }
     } else {
       // Other tools: finish drawing on mouse up
       const shape = toolManager.finishDrawing()
@@ -261,16 +287,100 @@
   }
 
   function handleDblClick(e: MouseEvent) {
-    if (!renderer || !toolManager || currentTool !== 'path') return
+    if (!renderer || !toolManager) return
 
     // Double click to finish path
-    const shape = toolManager.finishPath()
-    if (shape) {
-      renderer.addShape(shape)
-      renderer.selectShape(shape.props.id)
-      hasSelection = true
+    if (currentTool === 'path') {
+      const shape = toolManager.finishPath()
+      if (shape) {
+        renderer.addShape(shape)
+        renderer.selectShape(shape.props.id)
+        hasSelection = true
+      }
+      renderer.setPreview(null)
+      return
     }
-    renderer.setPreview(null)
+
+    // Double click on text box to edit
+    if (currentTool === 'select') {
+      const rect = canvas.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+
+      const shape = renderer.getShapeAt(x, y)
+      if (shape && shape instanceof TextBox) {
+        startTextEditing(shape)
+      }
+    }
+  }
+
+  function startTextEditing(textBox: TextBox) {
+    if (!canvas) return
+
+    isEditingText = true
+    editingTextBox = textBox
+
+    // Create editing div overlay
+    const editorDiv = document.createElement('div')
+    editorDiv.contentEditable = 'true'
+    editorDiv.textContent = textBox.props.text
+    editorDiv.style.position = 'absolute'
+    editorDiv.style.left = `${textBox.props.x}px`
+    editorDiv.style.top = `${textBox.props.y}px`
+    editorDiv.style.width = `${textBox.props.width}px`
+    editorDiv.style.height = `${textBox.props.height}px`
+    editorDiv.style.fontSize = `${textBox.props.fontSize}px`
+    editorDiv.style.color = textBox.props.fontColor
+    editorDiv.style.fontFamily = textBox.props.fontFamily || 'Arial'
+    editorDiv.style.fontWeight = textBox.props.fontWeight || 'normal'
+    editorDiv.style.fontStyle = textBox.props.fontStyle || 'normal'
+    editorDiv.style.lineHeight = `${textBox.props.lineHeight || 1.2}`
+    editorDiv.style.padding = '5px'
+    editorDiv.style.border = '2px solid #2196F3'
+    editorDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.9)'
+    editorDiv.style.outline = 'none'
+    editorDiv.style.zIndex = '1000'
+    editorDiv.style.wordWrap = 'break-word'
+    editorDiv.style.overflow = 'auto'
+
+    // Apply rotation if present
+    if (textBox.props.rotation) {
+      const centerX = textBox.props.x + textBox.props.width / 2
+      const centerY = textBox.props.y + textBox.props.height / 2
+      editorDiv.style.transformOrigin = 'center'
+      editorDiv.style.transform = `rotate(${textBox.props.rotation}deg)`
+    }
+
+    textEditorDiv = editorDiv
+    canvas.parentElement?.appendChild(editorDiv)
+    editorDiv.focus()
+
+    // Select all text
+    const range = document.createRange()
+    range.selectNodeContents(editorDiv)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+
+    // Handle blur to finish editing
+    const finishEditing = () => {
+      if (editingTextBox && textEditorDiv) {
+        editingTextBox.props.text = textEditorDiv.textContent || 'Text'
+        textEditorDiv.remove()
+        textEditorDiv = null
+        editingTextBox = null
+        isEditingText = false
+        renderer?.render()
+      }
+    }
+
+    editorDiv.addEventListener('blur', finishEditing)
+    editorDiv.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        finishEditing()
+      }
+    })
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -558,6 +668,59 @@
       renderer.addShape(shape)
     })
 
+    // Parse foreignObject elements (text boxes)
+    const foreignObjects = svg.querySelectorAll('foreignObject')
+    foreignObjects.forEach((fo) => {
+      const x = parseFloat(fo.getAttribute('x') || '0')
+      const y = parseFloat(fo.getAttribute('y') || '0')
+      const width = parseFloat(fo.getAttribute('width') || '100')
+      const height = parseFloat(fo.getAttribute('height') || '50')
+      const rotation = parseRotation(fo)
+
+      // Parse div style attributes
+      const div = fo.querySelector('div')
+      if (!div) return
+
+      const text = div.textContent || 'Text'
+      const style = div.getAttribute('style') || ''
+
+      // Parse style attributes
+      const fontSizeMatch = style.match(/font-size:\s*(\d+)px/)
+      const fontSize = fontSizeMatch ? parseInt(fontSizeMatch[1]) : 16
+
+      const colorMatch = style.match(/color:\s*([^;]+)/)
+      const fontColor = colorMatch ? colorMatch[1].trim() : '#000000'
+
+      const fontFamilyMatch = style.match(/font-family:\s*([^;]+)/)
+      const fontFamily = fontFamilyMatch ? fontFamilyMatch[1].trim() : 'Arial'
+
+      const fontWeightMatch = style.match(/font-weight:\s*([^;]+)/)
+      const fontWeight = fontWeightMatch && fontWeightMatch[1].trim() === 'bold' ? 'bold' : 'normal'
+
+      const fontStyleMatch = style.match(/font-style:\s*([^;]+)/)
+      const fontStyle = fontStyleMatch && fontStyleMatch[1].trim() === 'italic' ? 'italic' : 'normal'
+
+      const lineHeightMatch = style.match(/line-height:\s*([^;]+)/)
+      const lineHeight = lineHeightMatch ? parseFloat(lineHeightMatch[1]) : 1.2
+
+      const shape = new TextBox({
+        id: `text-${Date.now()}-${Math.random()}`,
+        x,
+        y,
+        width,
+        height,
+        text,
+        fontSize,
+        fontColor,
+        fontFamily,
+        fontWeight: fontWeight as 'normal' | 'bold',
+        fontStyle: fontStyle as 'normal' | 'italic',
+        lineHeight,
+        rotation
+      })
+      renderer.addShape(shape)
+    })
+
     console.log('SVG loaded successfully')
   }
 </script>
@@ -654,6 +817,14 @@
         >
           <span class="icon">🖊️</span>
           <span class="label">Path</span>
+        </button>
+        <button
+          class:active={currentTool === 'text'}
+          onclick={() => setTool('text')}
+          title="Text Tool (T)"
+        >
+          <span class="icon">📝</span>
+          <span class="label">Text</span>
         </button>
       </div>
     </aside>

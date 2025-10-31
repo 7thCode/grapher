@@ -1,5 +1,5 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line, Path } from './Shape'
+import { Rect, Circle, Line, Path, TextBox } from './Shape'
 import { TransformControls, type HandleType } from './TransformControls'
 
 export class Renderer {
@@ -42,6 +42,9 @@ export class Renderer {
       shape.props.x += dx
       shape.props.y += dy
       // TODO: update path data
+    } else if (shape instanceof TextBox) {
+      shape.props.x += dx
+      shape.props.y += dy
     }
 
     this.render()

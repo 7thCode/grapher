@@ -308,4 +308,115 @@ export class Path {
   }
 }
 
-export type Shape = Rect | Circle | Line | Path
+// TextBox shape
+export interface TextBoxProps extends ShapeProps {
+  width: number
+  height: number
+  text: string
+  fontSize: number
+  fontColor: string
+  fontFamily?: string
+  fontWeight?: 'normal' | 'bold'
+  fontStyle?: 'normal' | 'italic'
+  lineHeight?: number
+}
+
+export class TextBox {
+  constructor(public props: TextBoxProps) {}
+
+  render(ctx: CanvasRenderingContext2D) {
+    const {
+      x, y, width, height,
+      text, fontSize, fontColor,
+      fontFamily = 'Arial',
+      fontWeight = 'normal',
+      fontStyle = 'normal',
+      lineHeight = 1.2,
+      rotation = 0
+    } = this.props
+
+    ctx.save()
+
+    // Apply rotation around center
+    if (rotation !== 0) {
+      const centerX = x + width / 2
+      const centerY = y + height / 2
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
+
+    // Set text styles
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+    ctx.fillStyle = fontColor
+    ctx.textBaseline = 'top'
+
+    // Word wrap implementation
+    const words = text.split(' ')
+    const lines: string[] = []
+    let currentLine = ''
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word
+      const metrics = ctx.measureText(testLine)
+
+      if (metrics.width > width - 10 && currentLine) {
+        lines.push(currentLine)
+        currentLine = word
+      } else {
+        currentLine = testLine
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+
+    // Draw text lines
+    const lineHeightPx = fontSize * lineHeight
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + 5, y + 5 + i * lineHeightPx)
+    })
+
+    ctx.restore()
+  }
+
+  containsPoint(px: number, py: number): boolean {
+    const { x, y, width, height } = this.props
+    return px >= x && px <= x + width && py >= y && py <= y + height
+  }
+
+  toSVG(): string {
+    const {
+      x, y, width, height,
+      text, fontSize, fontColor,
+      fontFamily = 'Arial',
+      fontWeight = 'normal',
+      fontStyle = 'normal',
+      lineHeight = 1.2,
+      rotation = 0
+    } = this.props
+
+    const centerX = x + width / 2
+    const centerY = y + height / 2
+    const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${centerX} ${centerY})"` : ''
+
+    const escapedText = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+
+    return `<foreignObject x="${x}" y="${y}" width="${width}" height="${height}" ${transformAttr}>
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: ${fontFamily}; font-size: ${fontSize}px; color: ${fontColor}; font-weight: ${fontWeight}; font-style: ${fontStyle}; line-height: ${lineHeight}; word-wrap: break-word; padding: 5px;">
+    ${escapedText}
+  </div>
+</foreignObject>`
+  }
+
+  getBounds() {
+    const { x, y, width, height } = this.props
+    return { x, y, width, height }
+  }
+}
+
+export type Shape = Rect | Circle | Line | Path | TextBox
