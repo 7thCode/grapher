@@ -517,3 +517,165 @@ $effect(() => {
 - `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - isDirty管理、Svelte 5対応
 - `/Users/oda/project/claude/grapher/src/main.ts` - デバッグログ削除
 - `/Users/oda/project/claude/grapher/src/App.svelte` - デバッグUI削除
+
+---
+
+## 2025-11-01 - ドラッグによる複数選択機能の実装
+
+### 実装内容
+Selectツールで空白エリアをドラッグすることで、範囲内の複数のシェイプを一度に選択できる機能を追加。
+
+### 機能詳細
+
+**基本動作:**
+- Selectツールで空白エリアをクリック&ドラッグすると選択矩形が表示される
+- ドラッグ中は半透明の青い矩形で選択範囲を可視化
+- マウスを離すと、矩形内に交差するすべてのシェイプが選択される
+
+**Shiftキーによる追加選択:**
+- Shiftキーを押しながらドラッグ選択を開始すると、既存の選択を維持したまま追加選択が可能
+- Shiftキーなしでドラッグ選択すると、既存の選択がクリアされて新しい選択に置き換わる
+
+### 実装詳細
+
+#### Canvas.svelte - 状態変数の追加
+```typescript
+// Drag selection (rubber band selection)
+let isSelectingArea = false
+let selectionRect = { x: 0, y: 0, width: 0, height: 0 }
+```
+
+#### Canvas.svelte:409-419 - handleMouseDown
+空白エリアをクリックしたときに選択矩形のドラッグを開始:
+```typescript
+} else {
+  // Clicking on empty area starts drag selection
+  isSelectingArea = true
+  dragStart = { x, y }
+  selectionRect = { x, y, width: 0, height: 0 }
+
+  // Clear selection unless Shift is held (for additive selection)
+  if (!e.shiftKey) {
+    renderer.selectShape(null)
+    hasSelection = false
+  }
+}
+```
+
+#### Canvas.svelte:454-465 - handleMouseMove
+ドラッグ中に選択矩形のサイズを更新:
+```typescript
+if (isSelectingArea) {
+  // Update selection rectangle
+  const minX = Math.min(dragStart.x, x)
+  const minY = Math.min(dragStart.y, y)
+  const maxX = Math.max(dragStart.x, x)
+  const maxY = Math.max(dragStart.y, y)
+  selectionRect = {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  }
+}
+```
+
+#### Canvas.svelte:527-561 - handleMouseUp
+選択矩形内のシェイプを検索して選択:
+```typescript
+if (isSelectingArea) {
+  // Find shapes within selection rectangle
+  const shapes = renderer.getShapes()
+  const selectedShapes: string[] = []
+
+  for (const shape of shapes) {
+    const bounds = shape.getBounds()
+    // Check if shape's bounds intersect with selection rectangle
+    if (
+      bounds.x < selectionRect.x + selectionRect.width &&
+      bounds.x + bounds.width > selectionRect.x &&
+      bounds.y < selectionRect.y + selectionRect.height &&
+      bounds.y + bounds.height > selectionRect.y
+    ) {
+      selectedShapes.push(shape.props.id)
+    }
+  }
+
+  // Select the shapes (additive if already had selection)
+  if (selectedShapes.length > 0) {
+    // Select first shape
+    renderer.selectShape(selectedShapes[0], hasSelection)
+    // Add remaining shapes to selection
+    for (let i = 1; i < selectedShapes.length; i++) {
+      renderer.selectShape(selectedShapes[i], true)
+    }
+    hasSelection = true
+    updateSelectionState()
+  }
+
+  // Reset selection rectangle state
+  isSelectingArea = false
+  selectionRect = { x: 0, y: 0, width: 0, height: 0 }
+}
+```
+
+#### Canvas.svelte - 選択矩形のビジュアル表示
+Canvas上に絶対配置された半透明のオーバーレイで選択矩形を描画:
+```svelte
+<!-- Selection rectangle overlay -->
+{#if isSelectingArea && selectionRect.width > 0 && selectionRect.height > 0}
+  <div
+    class="selection-overlay"
+    style="
+      left: {selectionRect.x}px;
+      top: {selectionRect.y}px;
+      width: {selectionRect.width}px;
+      height: {selectionRect.height}px;
+    "
+  ></div>
+{/if}
+```
+
+#### Canvas.svelte - CSS スタイル
+```css
+.selection-overlay {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(33, 150, 243, 0.15);
+  border: 2px solid #2196F3;
+  z-index: 100;
+}
+```
+
+### 使い方
+
+1. **Selectツール**を選択
+2. キャンバス上の**空白エリア**でクリック&ドラッグ
+3. 青い選択矩形が表示され、範囲内のシェイプがハイライトされる
+4. マウスを離すと、範囲内のすべてのシェイプが選択される
+5. **Shift + ドラッグ**で既存の選択に追加選択
+
+### 技術詳細
+
+**交差判定:**
+- AABBによる矩形同士の交差判定
+- シェイプの境界ボックス (`getBounds()`) と選択矩形が交差すれば選択
+
+**マルチ選択の統合:**
+- Rendererの既存のマルチ選択機能 (`selectShape(id, addToSelection)`) を利用
+- 整列ツールなどの既存の複数選択機能とシームレスに統合
+
+**ビジュアルフィードバック:**
+- ドラッグ中の選択矩形はHTML要素としてオーバーレイ表示
+- `pointer-events: none` で選択矩形がマウスイベントを妨げない
+
+### 結果
+
+✅ ドラッグで複数のシェイプを同時に選択可能
+✅ Shiftキーで追加選択が可能
+✅ 選択中の視覚的フィードバック（青い半透明の矩形）
+✅ 既存のマルチ選択機能（整列・分配ツール）と完全に統合
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - ドラッグ選択ロジック、ビジュアル表示、CSS

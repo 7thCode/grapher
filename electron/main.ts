@@ -226,9 +226,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
+  // Always quit when all windows are closed
+  app.quit()
 })
 
 app.on('activate', () => {
