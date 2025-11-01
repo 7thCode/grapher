@@ -22,7 +22,14 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "mcp__serena__insert_after_symbol",
-      "mcp__serena__replace_symbol_body"
+      "mcp__serena__replace_symbol_body",
+      "Bash(npx tsc:*)",
+      "Bash(open:*)",
+      "Bash(cat:*)",
+      "Bash(npx asar:*)",
+      "Bash(kill:*)",
+      "Bash(npm run build:dir:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

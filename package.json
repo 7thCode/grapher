@@ -19,6 +19,7 @@
   "build": {
     "appId": "com.grapher.app",
     "productName": "Grapher",
+    "asar": false,
     "files": [
       "dist/**/*",
       "dist-electron/**/*"

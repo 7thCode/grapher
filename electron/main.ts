@@ -25,7 +25,6 @@ function createMenu() {
           label: 'Load...',
           accelerator: 'CmdOrCtrl+O',
           click: () => {
-            console.log('Load menu clicked, sending menu-load event')
             win?.webContents.send('menu-load')
           }
         },
@@ -164,13 +163,10 @@ function createWindow() {
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
-
-    // Wait for page to load before opening DevTools
-    win.webContents.on('did-finish-load', () => {
-      console.log('Page loaded, opening DevTools...')
-      win?.webContents.openDevTools()
-    })
+    // Open DevTools in development
+    win.webContents.openDevTools()
   } else {
+    // Use file:// protocol with proper path resolution
     win.loadFile(path.join(process.env.DIST, 'index.html'))
   }
 
@@ -178,37 +174,43 @@ function createWindow() {
   win.on('close', async (e) => {
     if (!win || pendingClose) return
 
-    // Prevent default close
+    // Always prevent default first, then check if we should close
     e.preventDefault()
 
-    // Ask renderer process if there are unsaved changes
-    const response = await win.webContents.executeJavaScript(
-      'window.isDirty !== undefined ? window.isDirty : false'
-    )
+    try {
+      // Ask renderer process if there are unsaved changes
+      const response = await win.webContents.executeJavaScript(
+        'window.isDirty !== undefined ? window.isDirty : false'
+      )
 
-    if (response === true) {
-      // There are unsaved changes - show dialog
-      const choice = await dialog.showMessageBox(win, {
-        type: 'question',
-        buttons: ['Save', 'Don\'t Save', 'Cancel'],
-        defaultId: 0,
-        cancelId: 2,
-        title: 'Unsaved Changes',
-        message: 'Do you want to save the changes before closing?',
-        detail: 'Your changes will be lost if you don\'t save them.'
-      })
+      if (response === true) {
+        // There are unsaved changes - show dialog
+        const choice = await dialog.showMessageBox(win, {
+          type: 'question',
+          buttons: ['Save', 'Don\'t Save', 'Cancel'],
+          defaultId: 0,
+          cancelId: 2,
+          title: 'Unsaved Changes',
+          message: 'Do you want to save the changes before closing?',
+          detail: 'Your changes will be lost if you don\'t save them.'
+        })
 
-      if (choice.response === 0) {
-        // Save - wait for save-completed event
-        pendingClose = true
-        win.webContents.send('menu-save')
-      } else if (choice.response === 1) {
-        // Don't Save
+        if (choice.response === 0) {
+          // Save - wait for save-completed event
+          pendingClose = true
+          win.webContents.send('menu-save')
+        } else if (choice.response === 1) {
+          // Don't Save
+          win.destroy()
+        }
+        // Cancel: do nothing (window stays open)
+      } else {
+        // No unsaved changes - close immediately
         win.destroy()
       }
-      // Cancel: do nothing
-    } else {
-      // No unsaved changes - close immediately
+    } catch (err) {
+      console.error('Error checking isDirty:', err)
+      // On error, close immediately
       win.destroy()
     }
   })

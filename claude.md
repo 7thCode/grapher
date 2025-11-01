@@ -167,3 +167,353 @@ editingTextBox.props.text = textWithNewlines || 'Text'
 ### 変更ファイル
 - `/Users/oda/project/claude/grapher/src/lib/engine/Shape.ts` (render メソッド)
 - `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` (startTextEditing, finishEditing)
+
+---
+
+## 2025-11-01 - ベジェ曲線の制御点編集機能の実装
+
+### 実装内容
+Pathツールで作成したパスをベジェ曲線として編集できる機能を追加。制御点の個別ドラッグ、ポイントの追加・削除、直線とベジェ曲線の相互変換が可能。
+
+### 新規ファイル
+
+#### PathEditManager.ts
+パス編集の全てのロジックを管理するクラス。
+
+**主要機能:**
+- `startEditing(path)` - パス編集モードを開始
+- `stopEditing()` - パス編集モードを終了
+- `getHandleAt(x, y)` - 位置にあるハンドルを検索（アンカーポイントまたは制御点）
+- `moveHandle(handle, dx, dy)` - ハンドルを移動（アンカーポイントと制御点の両方に対応）
+- `addPoint(x, y, insertAfterIndex?)` - 新しいポイントを追加
+- `removePoint(pointIndex)` - ポイントを削除（最低2ポイント必要）
+- `convertToCubicBezier(pointIndex)` - ポイントをベジェ曲線に変換
+- `convertToLine(pointIndex)` - ポイントを直線に変換
+- `render(ctx)` - ハンドルとガイドラインを描画
+
+**描画:**
+- アンカーポイント: 青色の正方形（6px × 6px）
+- 制御点: オレンジ色の円（半径6px）
+- ガイドライン: 点線でアンカーポイントと制御点を接続
+
+### 修正内容
+
+#### Shape.ts
+`PathPoint` インターフェースにベジェ曲線の制御点フィールドを追加:
+```typescript
+export interface PathPoint {
+  x: number
+  y: number
+  type: 'M' | 'L' | 'C' | 'Q'
+  // Cubic bezier (C) の制御点
+  cp1x?: number
+  cp1y?: number
+  cp2x?: number
+  cp2y?: number
+  // Quadratic bezier (Q) の制御点
+  cpx?: number
+  cpy?: number
+}
+```
+
+#### Renderer.ts
+- `PathEditManager` インスタンスを追加
+- パス編集の開始/終了メソッドを追加:
+  - `startPathEditing(path)`
+  - `stopPathEditing()`
+  - `isEditingPath()`
+  - `getPathEditManager()`
+- `render()` メソッドでパス編集ハンドルを描画
+
+#### Canvas.svelte
+
+**状態変数:**
+```typescript
+let isEditingPath = false
+let editingPath: Path | null = null
+```
+
+**パス編集の開始:**
+- Pathシェイプをダブルクリックで編集モードに入る
+- `startPathEditing(path)` 関数でRendererに編集モードを通知
+
+**マウスイベント処理:**
+- `handleMouseDown` - パス編集モード時にハンドルをクリックするとドラッグ開始
+- `handleMouseMove` - ドラッグ中のハンドルを移動
+- `handleMouseUp` - ドラッグ状態をリセット
+
+**UI コントロール:**
+ツールバーにパス編集用のボタンを追加:
+- ➕ ポイント追加 (A)
+- ➖ ポイント削除 (D)
+- 🔄 ベジェ曲線に変換 (C)
+- 📏 直線に変換 (L)
+- ✓ 編集終了 (ESC)
+
+**キーボードショートカット:**
+- `A` - 最後のポイントの横に新しいポイントを追加
+- `D` - 最後のポイントを削除（最低2ポイント必要）
+- `C` - 最後のポイントをベジェ曲線に変換
+- `L` - 最後のポイントを直線に変換
+- `ESC` - パス編集モードを終了
+
+### 使い方
+1. Pathツールで図形を作成
+2. Selectツールに切り替え
+3. 作成したPathを**ダブルクリック**して編集モードに入る
+4. **アンカーポイント**（青い正方形）または**制御点**（オレンジの円）をドラッグして形状を調整
+5. ツールバーのボタンまたはキーボードショートカットでポイントの追加・削除・変換
+6. ESCキーまたは✓ボタンで編集終了
+
+### 技術詳細
+- **ハンドル検出**: 6px半径内でマウス位置とハンドル位置の距離を計算
+- **SVG パスデータ更新**: `updatePathData()` でポイント配列から `d` 属性を再生成
+- **ベジェ曲線変換**: 次のポイントとの距離の1/3と2/3の位置に制御点を配置
+- **状態管理**: `window._draggedPathHandle` で一時的にドラッグ中のハンドルを保持
+
+### 変更ファイル
+- `/Users/oda/project/claude/grapher/src/lib/engine/PathEditManager.ts` - **NEW**
+- `/Users/oda/project/claude/grapher/src/lib/engine/Shape.ts` - PathPoint interface拡張
+- `/Users/oda/project/claude/grapher/src/lib/engine/Renderer.ts` - PathEditManager統合
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - UI/イベント処理
+
+---
+
+## 2025-11-01 - パッケージング問題と未保存変更確認機能の修正
+
+### 問題1: パッケージング後にアプリが起動しない
+
+**症状:**
+- 開発環境 (`npm run dev`) では正常に動作
+- パッケージング後 (`npm run build`) は白い画面のみ表示
+- JavaScriptファイルが読み込まれない
+
+**原因:**
+- Electronのデフォルト設定でファイルが `app.asar` アーカイブにパッケージされる
+- ES modules (`type="module"`) は asar アーカイブから正常にロードできない
+
+**修正内容:**
+
+#### package.json
+```json
+"build": {
+  "appId": "com.grapher.app",
+  "productName": "Grapher",
+  "asar": false,  // ← 追加
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*"
+  ],
+  ...
+}
+```
+
+**結果:**
+✅ ファイルが `app.asar` ではなく `app/` ディレクトリに展開される
+✅ ES modules が正常にロードされる
+✅ パッケージング後のアプリが正常に起動する
+
+---
+
+### 問題2: アプリが終了できない
+
+**症状:**
+- ウィンドウの×ボタンや `Cmd+Q` で終了できない
+- アプリが常に開いたまま
+
+**原因:**
+- `electron/main.ts:178` で**常に** `e.preventDefault()` を呼んでいた
+- 未保存の変更がない場合でもウィンドウの終了が阻止されていた
+
+**修正内容:**
+
+#### electron/main.ts (修正前)
+```typescript
+win.on('close', async (e) => {
+  if (!win || pendingClose) return
+
+  e.preventDefault()  // ❌ 常に呼ばれる
+
+  const response = await win.webContents.executeJavaScript(...)
+  if (response === true) {
+    // ダイアログ表示
+  } else {
+    win.destroy()
+  }
+})
+```
+
+#### electron/main.ts (修正後)
+```typescript
+win.on('close', async (e) => {
+  if (!win || pendingClose) return
+
+  // 最初にpreventDefaultを呼ぶ
+  e.preventDefault()
+
+  try {
+    const response = await win.webContents.executeJavaScript(...)
+
+    if (response === true) {
+      // ダイアログ表示
+    } else {
+      win.destroy()  // ✅ 未保存がなければ終了
+    }
+  } catch (err) {
+    win.destroy()
+  }
+})
+```
+
+**結果:**
+✅ 未保存の変更がない場合は正常に終了する
+✅ 未保存の変更がある場合のみダイアログを表示
+
+---
+
+### 問題3: 未保存変更確認ダイアログが表示されない
+
+**症状:**
+- 図形を描画してから終了しても、確認ダイアログが表示されない
+- 即座に終了してしまう
+
+**原因:**
+- `isDirty` 変数が `window.isDirty` として公開されていない
+- Svelte 5 の runesモードで `$effect()` が `isDirty` の変更を追跡できていない
+
+**修正内容:**
+
+#### Canvas.svelte
+```typescript
+// Helper function to set isDirty and window.isDirty
+function setDirty(value: boolean) {
+  isDirty = value
+  if (typeof window !== 'undefined') {
+    (window as any).isDirty = value
+  }
+}
+
+// $effect でも公開（二重保険）
+$effect(() => {
+  if (typeof window !== 'undefined') {
+    (window as any).isDirty = isDirty
+  }
+})
+
+// 変更検出時
+renderer.setOnChangeCallback(() => {
+  setDirty(true)
+})
+
+// 保存時
+setDirty(false)
+```
+
+**結果:**
+✅ 図形を描画すると `window.isDirty` が `true` に設定される
+✅ 終了時に確認ダイアログが正常に表示される
+
+---
+
+### 問題4: ダイアログが一瞬表示されて消える
+
+**症状:**
+- 確認ダイアログが一瞬表示されるが、すぐに消えてアプリが終了する
+
+**原因:**
+- `await executeJavaScript()` を待っている間に、デフォルトの終了処理が進んでしまう
+- `e.preventDefault()` を呼ぶタイミングが遅すぎた
+
+**修正内容:**
+
+#### electron/main.ts (最終版)
+```typescript
+win.on('close', async (e) => {
+  if (!win || pendingClose) return
+
+  // ✅ 最初に必ずpreventDefaultを呼ぶ
+  e.preventDefault()
+
+  try {
+    // その後でチェック
+    const response = await win.webContents.executeJavaScript(...)
+
+    if (response === true) {
+      const choice = await dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: ['Save', 'Don\'t Save', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        title: 'Unsaved Changes',
+        message: 'Do you want to save the changes before closing?',
+        detail: 'Your changes will be lost if you don\'t save them.'
+      })
+
+      if (choice.response === 0) {
+        // Save
+        pendingClose = true
+        win.webContents.send('menu-save')
+      } else if (choice.response === 1) {
+        // Don't Save
+        win.destroy()
+      }
+      // Cancel: do nothing
+    } else {
+      // No unsaved changes
+      win.destroy()
+    }
+  } catch (err) {
+    console.error('Error checking isDirty:', err)
+    win.destroy()
+  }
+})
+```
+
+**結果:**
+✅ ダイアログが正常に表示され、ユーザーの選択を待つ
+✅ Save/Don't Save/Cancel の3つの選択肢が正しく動作
+
+---
+
+### Svelte 5 runesモード対応
+
+`$:` リアクティブステートメントが使えないため、全て `$effect()` または関数に変換:
+
+```typescript
+// 修正前
+$: {
+  if (renderer) {
+    const snapManager = renderer.getSnapManager()
+    snapManager.setSettings({ enabled: snapEnabled, gridEnabled })
+  }
+}
+
+// 修正後
+$effect(() => {
+  if (renderer) {
+    const snapManager = renderer.getSnapManager()
+    snapManager.setSettings({ enabled: snapEnabled, gridEnabled })
+  }
+})
+```
+
+---
+
+### 最終的な動作
+
+✅ **何も描画せずに終了**: 即座に終了（ダイアログなし）
+✅ **描画してから終了**: 確認ダイアログが表示される
+  - **Save**: 保存ダイアログ → 保存後に終了
+  - **Don't Save**: 即座に終了
+  - **Cancel**: ウィンドウが開いたまま
+✅ **保存後に終了**: 即座に終了（ダイアログなし）
+
+---
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/package.json` - asar無効化
+- `/Users/oda/project/claude/grapher/electron/main.ts` - ウィンドウクローズ処理
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - isDirty管理、Svelte 5対応
+- `/Users/oda/project/claude/grapher/src/main.ts` - デバッグログ削除
+- `/Users/oda/project/claude/grapher/src/App.svelte` - デバッグUI削除

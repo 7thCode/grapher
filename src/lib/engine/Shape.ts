@@ -207,9 +207,23 @@ export class Line {
 }
 
 // Path shape (for bezier curves)
+export interface PathPoint {
+  x: number
+  y: number
+  type: 'M' | 'L' | 'C' | 'Q'
+  // For cubic bezier (C): control points
+  cp1x?: number
+  cp1y?: number
+  cp2x?: number
+  cp2y?: number
+  // For quadratic bezier (Q): control point
+  cpx?: number
+  cpy?: number
+}
+
 export interface PathProps extends ShapeProps {
   d: string // SVG path data
-  points?: { x: number; y: number; type: 'M' | 'L' | 'C' | 'Q' }[]
+  points?: PathPoint[]
 }
 
 export class Path {

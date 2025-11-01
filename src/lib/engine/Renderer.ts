@@ -13,6 +13,7 @@ import {
 } from './Command'
 import { SnapManager, type SnapGuide } from './SnapManager'
 import { AlignManager, type AlignType, type DistributeType } from './AlignManager'
+import { PathEditManager, type PathHandle } from './PathEditManager'
 
 export class Renderer {
   private shapes: Shape[] = []
@@ -24,6 +25,7 @@ export class Renderer {
   private snapManager: SnapManager = new SnapManager()
   private snapGuides: SnapGuide[] = []
   private alignManager: AlignManager = new AlignManager()
+  private pathEditManager: PathEditManager = new PathEditManager()
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -225,6 +227,12 @@ export class Renderer {
     // Draw transform controls (resize handles) only for single selection
     if (this.selectedIds.length === 1 && this.transformControls) {
       this.transformControls.render(this.ctx)
+    }
+
+    // Draw path edit handles if editing a path
+    const editingPath = this.pathEditManager.getEditingPath()
+    if (editingPath) {
+      this.pathEditManager.render(this.ctx)
     }
   }
 
@@ -526,6 +534,36 @@ export class Renderer {
 
     this.notifyChange()
     this.render()
+  }
+
+  /**
+   * Get path edit manager
+   */
+  getPathEditManager(): PathEditManager {
+    return this.pathEditManager
+  }
+
+  /**
+   * Start editing a path
+   */
+  startPathEditing(path: Path) {
+    this.pathEditManager.startEditing(path)
+    this.render()
+  }
+
+  /**
+   * Stop path editing
+   */
+  stopPathEditing() {
+    this.pathEditManager.stopEditing()
+    this.render()
+  }
+
+  /**
+   * Check if path is being edited
+   */
+  isEditingPath(): boolean {
+    return this.pathEditManager.getEditingPath() !== null
   }
 
   bringForward(id: string) {

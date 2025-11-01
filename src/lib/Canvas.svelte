@@ -47,15 +47,28 @@
   let editingTextBox: TextBox | null = null
   let textEditorDiv: HTMLDivElement | null = null
 
+  // Path editing state
+  let isEditingPath = false
+  let editingPath: Path | null = null
+
   // File management state
   let currentFilePath: string | null = null
   let isDirty = false
+
+  // Helper function to set isDirty and window.isDirty
+  function setDirty(value: boolean) {
+    isDirty = value
+    if (typeof window !== 'undefined') {
+      (window as any).isDirty = value
+    }
+  }
 
   // Snap settings
   let snapEnabled = true
   let gridEnabled = true
 
-  $: {
+  // Update snap settings reactively
+  $effect(() => {
     if (renderer) {
       const snapManager = renderer.getSnapManager()
       snapManager.setSettings({
@@ -63,17 +76,17 @@
         gridEnabled: gridEnabled,
       })
     }
-  }
+  })
 
   // Expose isDirty to window for Electron main process
-  $: {
+  $effect(() => {
     if (typeof window !== 'undefined') {
       (window as any).isDirty = isDirty
     }
-  }
+  })
 
-  $: {
-    // Update property controls when selection changes
+  // Update selection-related state
+  function updateSelectionState() {
     if (renderer) {
       const selected = renderer.getSelectedShape()
       hasSelection = selected !== null
@@ -204,7 +217,10 @@
 
   onMount(() => {
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    if (!ctx) {
+      console.error('Failed to get canvas context')
+      return
+    }
 
     renderer = new Renderer(canvas, ctx)
     toolManager = new ToolManager()
@@ -212,7 +228,7 @@
 
     // Set up change callback for isDirty tracking
     renderer.setOnChangeCallback(() => {
-      isDirty = true
+      setDirty(true)
     })
 
     // Initial resize
@@ -244,68 +260,49 @@
 
     // Listen for menu events from Electron
     try {
-      console.log('Checking for Electron environment...')
-
       // Access ipcRenderer exposed via preload script
       const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
 
       if (ipcRenderer) {
-        console.log('Setting up IPC listeners...')
-
         ipcRenderer.on('menu-undo', () => {
-          console.log('Received menu-undo event')
           if (renderer) renderer.undo()
         })
         ipcRenderer.on('menu-redo', () => {
-          console.log('Received menu-redo event')
           if (renderer) renderer.redo()
         })
         ipcRenderer.on('menu-load', () => {
-          console.log('Received menu-load event')
           openLoadDialog()
         })
         ipcRenderer.on('menu-save', () => {
-          console.log('Received menu-save event')
           saveSVG()
         })
         ipcRenderer.on('menu-save-as', () => {
-          console.log('Received menu-save-as event')
           saveSVGAs()
         })
         ipcRenderer.on('menu-copy', () => {
-          console.log('Received menu-copy event')
           copyShape()
         })
         ipcRenderer.on('menu-paste', () => {
-          console.log('Received menu-paste event')
           pasteShape()
         })
         ipcRenderer.on('menu-bring-to-front', () => {
-          console.log('Received menu-bring-to-front event')
           bringToFront()
         })
         ipcRenderer.on('menu-bring-forward', () => {
-          console.log('Received menu-bring-forward event')
           bringForward()
         })
         ipcRenderer.on('menu-send-backward', () => {
-          console.log('Received menu-send-backward event')
           sendBackward()
         })
         ipcRenderer.on('menu-send-to-back', () => {
-          console.log('Received menu-send-to-back event')
           sendToBack()
         })
         ipcRenderer.on('menu-group', () => {
-          console.log('Received menu-group event')
           groupShapes()
         })
         ipcRenderer.on('menu-ungroup', () => {
-          console.log('Received menu-ungroup event')
           ungroupShapes()
         })
-
-        console.log('IPC listeners registered successfully')
 
         return () => {
           window.removeEventListener('resize', resizeCanvas)
@@ -324,11 +321,9 @@
           ipcRenderer.removeAllListeners('menu-group')
           ipcRenderer.removeAllListeners('menu-ungroup')
         }
-      } else {
-        console.log('ipcRenderer not available - not running in Electron')
       }
     } catch (err) {
-      console.log('Error setting up IPC:', err)
+      console.error('Error setting up IPC:', err)
     }
 
     return () => {
@@ -352,6 +347,25 @@
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+
+    // Path editing mode
+    if (isEditingPath) {
+      const pathEditManager = renderer.getPathEditManager()
+      const pathHandle = pathEditManager.getHandleAt(x, y)
+
+      if (pathHandle) {
+        // Start dragging a path handle
+        isDragging = true
+        dragStart = { x, y }
+        // Store handle reference for later use
+        ;(window as any)._draggedPathHandle = pathHandle
+        return
+      } else {
+        // Click outside - stop editing
+        stopPathEditing()
+        return
+      }
+    }
 
     if (currentTool === 'select') {
       // Check if clicking on a resize/rotate handle first
@@ -414,6 +428,18 @@
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+
+    // Path editing mode
+    if (isEditingPath && isDragging) {
+      const pathHandle = (window as any)._draggedPathHandle
+      if (pathHandle) {
+        const dx = x - dragStart.x
+        const dy = y - dragStart.y
+        renderer.getPathEditManager().moveHandle(pathHandle, dx, dy)
+        dragStart = { x, y }
+      }
+      return
+    }
 
     if (currentTool === 'select') {
       if (isRotating) {
@@ -499,6 +525,12 @@
 
       // Clear snap guides
       renderer.clearSnapGuides()
+    } else if (isEditingPath) {
+      // Path editing mode: reset drag state
+      if (isDragging) {
+        isDragging = false
+        ;(window as any)._draggedPathHandle = null
+      }
     } else if (currentTool === 'path') {
       // Path tool: do nothing on mouse up (continue drawing)
     } else if (currentTool === 'text') {
@@ -539,15 +571,17 @@
       return
     }
 
-    // Double click on text box to edit
+    // Double click to edit text box or path
     if (currentTool === 'select') {
       const rect = canvas.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
 
       const shape = renderer.getShapeAt(x, y)
-      if (shape && shape instanceof TextBox) {
+      if (shape instanceof TextBox) {
         startTextEditing(shape)
+      } else if (shape instanceof Path) {
+        startPathEditing(shape)
       }
     }
   }
@@ -631,6 +665,22 @@
     })
   }
 
+  function startPathEditing(path: Path) {
+    if (!renderer) return
+
+    isEditingPath = true
+    editingPath = path
+    renderer.startPathEditing(path)
+  }
+
+  function stopPathEditing() {
+    if (!renderer) return
+
+    isEditingPath = false
+    editingPath = null
+    renderer.stopPathEditing()
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     // Delete: Delete or Backspace key to delete selected shape
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText) {
@@ -695,10 +745,54 @@
       return
     }
 
-    // ESC to cancel path drawing
-    if (e.key === 'Escape' && currentTool === 'path') {
-      toolManager.cancelDrawing()
-      renderer.setPreview(null)
+    // ESC to cancel path drawing or exit path editing
+    if (e.key === 'Escape') {
+      if (currentTool === 'path') {
+        toolManager.cancelDrawing()
+        renderer.setPreview(null)
+      } else if (isEditingPath) {
+        stopPathEditing()
+      }
+      return
+    }
+
+    // Path editing shortcuts
+    if (isEditingPath && renderer) {
+      const pathEditManager = renderer.getPathEditManager()
+      const editingPath = pathEditManager.getEditingPath()
+
+      // A: Add point
+      if (e.key === 'a' && editingPath && editingPath.props.points) {
+        e.preventDefault()
+        const lastPoint = editingPath.props.points[editingPath.props.points.length - 1]
+        const x = lastPoint.x + 50
+        const y = lastPoint.y
+        pathEditManager.addPoint(x, y)
+        return
+      }
+
+      // D: Delete last point
+      if (e.key === 'd' && editingPath && editingPath.props.points && editingPath.props.points.length > 2) {
+        e.preventDefault()
+        pathEditManager.removePoint(editingPath.props.points.length - 1)
+        return
+      }
+
+      // C: Convert to cubic bezier
+      if (e.key === 'c' && editingPath && editingPath.props.points) {
+        e.preventDefault()
+        const lastIdx = editingPath.props.points.length - 1
+        pathEditManager.convertToCubicBezier(lastIdx)
+        return
+      }
+
+      // L: Convert to line
+      if (e.key === 'l' && editingPath && editingPath.props.points) {
+        e.preventDefault()
+        const lastIdx = editingPath.props.points.length - 1
+        pathEditManager.convertToLine(lastIdx)
+        return
+      }
     }
   }
 
@@ -719,7 +813,6 @@
     const selected = renderer.getSelectedShape()
     if (selected) {
       clipboardShape = selected
-      console.log('Shape copied to clipboard')
     }
   }
 
@@ -772,7 +865,6 @@
     renderer.addShape(newShape)
     renderer.selectShape(newShape.props.id)
     hasSelection = true
-    console.log('Shape pasted')
   }
 
   function bringToFront() {
@@ -823,9 +915,6 @@
     if (!renderer) return
 
     const svgString = renderer.exportSVG()
-    console.log('=== Exported SVG ===')
-    console.log(svgString)
-    console.log('===================')
 
     // Copy to clipboard
     try {
@@ -875,7 +964,7 @@
     if (result.success && !result.canceled) {
       if (result.filePath && result.filePath !== 'clipboard') {
         currentFilePath = result.filePath
-        isDirty = false
+        setDirty(false)
         alert(`SVG saved successfully!\nLocation: ${result.filePath}`)
       } else {
         alert('SVG copied to clipboard')
@@ -906,8 +995,7 @@
       const result = await ipcRenderer.invoke('save-svg-direct', svgString, filePath)
 
       if (result.success) {
-        isDirty = false
-        console.log(`Saved to ${filePath}`)
+        setDirty(false)
         return true
       } else {
         throw new Error(result.error || 'Failed to save')
@@ -926,21 +1014,17 @@
   }
 
   async function openLoadDialog() {
-    console.log('openLoadDialog called')
-
     // Try Electron IPC first
     const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
 
     if (ipcRenderer) {
       try {
-        console.log('Using Electron file dialog')
         const result = await ipcRenderer.invoke('load-svg')
 
         if (result.success && result.content) {
           loadSVG(result.content)
           currentFilePath = result.filePath
-          isDirty = false
-          console.log('SVG loaded from:', result.filePath)
+          setDirty(false)
         } else if (!result.canceled) {
           alert('Failed to load SVG file')
         }
@@ -951,7 +1035,6 @@
     }
 
     // Fallback to browser file input
-    console.log('Using browser file input, fileInput:', fileInput)
     fileInput?.click()
   }
 
@@ -1145,8 +1228,6 @@
       })
       renderer.addShape(shape)
     })
-
-    console.log('SVG loaded successfully')
   }
 
   /**
@@ -1186,8 +1267,7 @@
       const text = await file.text()
       loadSVG(text)
       currentFilePath = null // File dropped, not from disk location
-      isDirty = false
-      console.log('SVG loaded from dropped file:', file.name)
+      setDirty(false)
     } catch (err) {
       console.error('Failed to load dropped SVG:', err)
       alert('Failed to load SVG file')
@@ -1297,6 +1377,77 @@
             oninput={(e) => updateFontColor(e.currentTarget.value)}
           />
         </label>
+      </div>
+    {/if}
+
+    <!-- Path Editing Controls -->
+    {#if isEditingPath}
+      <div class="toolbar-section path-edit-tools">
+        <span class="section-label">パス編集:</span>
+        <button
+          class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            const editingPath = pathEditManager.getEditingPath()
+            if (editingPath && editingPath.props.points) {
+              const lastPoint = editingPath.props.points[editingPath.props.points.length - 1]
+              const x = lastPoint.x + 50
+              const y = lastPoint.y
+              pathEditManager.addPoint(x, y)
+            }
+          }}
+          title="ポイント追加 (A)"
+        >
+          ➕
+        </button>
+        <button
+          class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            const editingPath = pathEditManager.getEditingPath()
+            if (editingPath && editingPath.props.points && editingPath.props.points.length > 2) {
+              pathEditManager.removePoint(editingPath.props.points.length - 1)
+            }
+          }}
+          title="ポイント削除 (D)"
+        >
+          ➖
+        </button>
+        <button
+          class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            const editingPath = pathEditManager.getEditingPath()
+            if (editingPath && editingPath.props.points) {
+              const lastIdx = editingPath.props.points.length - 1
+              pathEditManager.convertToCubicBezier(lastIdx)
+            }
+          }}
+          title="ベジェ曲線に変換 (C)"
+        >
+          🔄
+        </button>
+        <button
+          class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            const editingPath = pathEditManager.getEditingPath()
+            if (editingPath && editingPath.props.points) {
+              const lastIdx = editingPath.props.points.length - 1
+              pathEditManager.convertToLine(lastIdx)
+            }
+          }}
+          title="直線に変換 (L)"
+        >
+          📏
+        </button>
+        <button
+          class="tool-button"
+          onclick={stopPathEditing}
+          title="編集終了 (ESC)"
+        >
+          ✓
+        </button>
       </div>
     {/if}
 
@@ -1567,6 +1718,31 @@
   .text-properties {
     border-left: 1px solid #444;
     padding-left: 16px;
+  }
+
+  .path-edit-tools {
+    border-left: 1px solid #444;
+    padding-left: 16px;
+  }
+
+  .tool-button {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #3c3c3c;
+    color: #ccc;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: all 0.2s;
+  }
+
+  .tool-button:hover {
+    background: #4c4c4c;
+    border-color: #666;
   }
 
   .snap-settings {
