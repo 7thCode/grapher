@@ -20,11 +20,24 @@
   let resizeHandle: HandleType | null = null
   let dragStart = { x: 0, y: 0 }
 
+  // Track cumulative move/resize for Undo/Redo
+  let totalMoveOffset = { dx: 0, dy: 0 }
+  let resizeStartBounds: { x: number; y: number; width: number; height: number } | null = null
+
   // Property editing state
   let selectedStroke = '#333333'
   let selectedStrokeWidth = 2
   let selectedFill = '#ff6b6b'
   let hasSelection = false
+
+  // Text properties
+  let selectedFontFamily = 'Arial'
+  let selectedFontSize = 24
+  let selectedFontWeight = 'normal'
+  let selectedFontStyle = 'normal'
+  let selectedTextDecoration = 'none'
+  let selectedFontColor = '#000000'
+  let isTextBoxSelected = false
 
   // Clipboard for copy/paste
   let clipboardShape: Shape | null = null
@@ -34,15 +47,38 @@
   let editingTextBox: TextBox | null = null
   let textEditorDiv: HTMLDivElement | null = null
 
+  // File management state
+  let currentFilePath: string | null = null
+  let isDirty = false
+
+  // Expose isDirty to window for Electron main process
+  $: {
+    if (typeof window !== 'undefined') {
+      (window as any).isDirty = isDirty
+    }
+  }
+
   $: {
     // Update property controls when selection changes
     if (renderer) {
       const selected = renderer.getSelectedShape()
       hasSelection = selected !== null
+      isTextBoxSelected = selected instanceof TextBox
+
       if (selected) {
         selectedStroke = selected.props.stroke || '#333333'
         selectedStrokeWidth = selected.props.strokeWidth || 2
         selectedFill = selected.props.fill || '#ff6b6b'
+
+        // Update text properties if TextBox is selected
+        if (selected instanceof TextBox) {
+          selectedFontFamily = selected.props.fontFamily || 'Arial'
+          selectedFontSize = selected.props.fontSize || 24
+          selectedFontWeight = selected.props.fontWeight || 'normal'
+          selectedFontStyle = selected.props.fontStyle || 'normal'
+          selectedTextDecoration = selected.props.textDecoration || 'none'
+          selectedFontColor = selected.props.fontColor || '#000000'
+        }
       }
     }
   }
@@ -74,6 +110,72 @@
     }
   }
 
+  function updateFontFamily(fontFamily: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { fontFamily: selected.props.fontFamily }
+      const newProps = { fontFamily }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedFontFamily = fontFamily
+    }
+  }
+
+  function updateFontSize(fontSize: number) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { fontSize: selected.props.fontSize }
+      const newProps = { fontSize }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedFontSize = fontSize
+    }
+  }
+
+  function updateFontWeight(fontWeight: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { fontWeight: selected.props.fontWeight }
+      const newProps = { fontWeight }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedFontWeight = fontWeight
+    }
+  }
+
+  function updateFontStyle(fontStyle: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { fontStyle: selected.props.fontStyle }
+      const newProps = { fontStyle }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedFontStyle = fontStyle
+    }
+  }
+
+  function updateTextDecoration(textDecoration: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { textDecoration: selected.props.textDecoration }
+      const newProps = { textDecoration }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedTextDecoration = textDecoration
+    }
+  }
+
+  function updateFontColor(fontColor: string) {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected instanceof TextBox) {
+      const oldProps = { fontColor: selected.props.fontColor }
+      const newProps = { fontColor }
+      renderer.commitUpdateProperties(selected.props.id, oldProps, newProps)
+      selectedFontColor = fontColor
+    }
+  }
+
   function resizeCanvas() {
     if (!canvas || !canvasContainer) return
 
@@ -94,11 +196,37 @@
     toolManager = new ToolManager()
     toolManager.setTool(currentTool)
 
+    // Set up change callback for isDirty tracking
+    renderer.setOnChangeCallback(() => {
+      isDirty = true
+    })
+
     // Initial resize
     resizeCanvas()
 
     // Resize on window resize
     window.addEventListener('resize', resizeCanvas)
+
+    // Keyboard shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!renderer) return
+
+      // Undo: Cmd+Z (Mac) or Ctrl+Z (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        renderer.undo()
+        return
+      }
+
+      // Redo: Cmd+Shift+Z (Mac) or Ctrl+Shift+Z (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        renderer.redo()
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
 
     // Listen for menu events from Electron
     try {
@@ -110,6 +238,14 @@
       if (ipcRenderer) {
         console.log('Setting up IPC listeners...')
 
+        ipcRenderer.on('menu-undo', () => {
+          console.log('Received menu-undo event')
+          if (renderer) renderer.undo()
+        })
+        ipcRenderer.on('menu-redo', () => {
+          console.log('Received menu-redo event')
+          if (renderer) renderer.redo()
+        })
         ipcRenderer.on('menu-load', () => {
           console.log('Received menu-load event')
           openLoadDialog()
@@ -117,6 +253,10 @@
         ipcRenderer.on('menu-save', () => {
           console.log('Received menu-save event')
           saveSVG()
+        })
+        ipcRenderer.on('menu-save-as', () => {
+          console.log('Received menu-save-as event')
+          saveSVGAs()
         })
         ipcRenderer.on('menu-copy', () => {
           console.log('Received menu-copy event')
@@ -126,15 +266,39 @@
           console.log('Received menu-paste event')
           pasteShape()
         })
+        ipcRenderer.on('menu-bring-to-front', () => {
+          console.log('Received menu-bring-to-front event')
+          bringToFront()
+        })
+        ipcRenderer.on('menu-bring-forward', () => {
+          console.log('Received menu-bring-forward event')
+          bringForward()
+        })
+        ipcRenderer.on('menu-send-backward', () => {
+          console.log('Received menu-send-backward event')
+          sendBackward()
+        })
+        ipcRenderer.on('menu-send-to-back', () => {
+          console.log('Received menu-send-to-back event')
+          sendToBack()
+        })
 
         console.log('IPC listeners registered successfully')
 
         return () => {
           window.removeEventListener('resize', resizeCanvas)
+          window.removeEventListener('keydown', handleKeyDown)
+          ipcRenderer.removeAllListeners('menu-undo')
+          ipcRenderer.removeAllListeners('menu-redo')
           ipcRenderer.removeAllListeners('menu-load')
           ipcRenderer.removeAllListeners('menu-save')
+          ipcRenderer.removeAllListeners('menu-save-as')
           ipcRenderer.removeAllListeners('menu-copy')
           ipcRenderer.removeAllListeners('menu-paste')
+          ipcRenderer.removeAllListeners('menu-bring-to-front')
+          ipcRenderer.removeAllListeners('menu-bring-forward')
+          ipcRenderer.removeAllListeners('menu-send-backward')
+          ipcRenderer.removeAllListeners('menu-send-to-back')
         }
       } else {
         console.log('ipcRenderer not available - not running in Electron')
@@ -145,6 +309,7 @@
 
     return () => {
       window.removeEventListener('resize', resizeCanvas)
+      window.removeEventListener('keydown', handleKeyDown)
     }
   })
 
@@ -172,6 +337,11 @@
           isRotating = true
         } else {
           isResizing = true
+          // Record initial bounds for Undo/Redo
+          const selectedShape = renderer.getSelectedShape()
+          if (selectedShape) {
+            resizeStartBounds = selectedShape.getBounds()
+          }
         }
         resizeHandle = handle
         dragStart = { x, y }
@@ -184,11 +354,21 @@
         isDragging = true
         draggedShapeId = clickedShape.props.id
         dragStart = { x, y }
-        renderer.selectShape(clickedShape.props.id)
+        totalMoveOffset = { dx: 0, dy: 0 }  // Reset cumulative move
+
+        // Shift+Click for multiple selection
+        if (e.shiftKey) {
+          renderer.selectShape(clickedShape.props.id, true) // addToSelection = true
+        } else {
+          renderer.selectShape(clickedShape.props.id)
+        }
         hasSelection = true
       } else {
-        renderer.selectShape(null)
-        hasSelection = false
+        // Clicking on empty area clears selection (unless Shift is held)
+        if (!e.shiftKey) {
+          renderer.selectShape(null)
+          hasSelection = false
+        }
       }
     } else if (currentTool === 'path') {
       // Path tool: add point on click
@@ -221,11 +401,19 @@
         const dy = y - dragStart.y
         renderer.resizeShape(resizeHandle, dx, dy)
         dragStart = { x, y }
-      } else if (isDragging && draggedShapeId) {
-        // Dragging shape
+      } else if (isDragging) {
+        // Dragging shape(s)
         const dx = x - dragStart.x
         const dy = y - dragStart.y
-        renderer.moveShape(draggedShapeId, dx, dy)
+
+        // Move all selected shapes
+        const selectedIds = renderer.getSelectedIds()
+        for (const id of selectedIds) {
+          renderer.moveShape(id, dx, dy)
+        }
+
+        totalMoveOffset.dx += dx  // Accumulate total movement
+        totalMoveOffset.dy += dy
         dragStart = { x, y }
       }
     } else if (currentTool === 'path') {
@@ -256,11 +444,25 @@
     if (!renderer || !toolManager) return
 
     if (currentTool === 'select') {
+      // Commit move/resize to Command history
+      if (isDragging) {
+        // Commit move for all selected shapes
+        const selectedIds = renderer.getSelectedIds()
+        for (const id of selectedIds) {
+          renderer.commitMove(id, totalMoveOffset.dx, totalMoveOffset.dy)
+        }
+      }
+      if (isResizing && resizeStartBounds && renderer.getSelectedShape()) {
+        renderer.commitResize(renderer.getSelectedShape()!.props.id, resizeStartBounds)
+      }
+
+      // Reset drag/resize state
       isDragging = false
       isResizing = false
       isRotating = false
       draggedShapeId = null
       resizeHandle = null
+      resizeStartBounds = null
     } else if (currentTool === 'path') {
       // Path tool: do nothing on mouse up (continue drawing)
     } else if (currentTool === 'text') {
@@ -394,6 +596,13 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // Delete: Delete or Backspace key to delete selected shape
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText) {
+      e.preventDefault()
+      deleteSelectedShape()
+      return
+    }
+
     // Copy: Cmd+C / Ctrl+C
     if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
       e.preventDefault()
@@ -408,11 +617,51 @@
       return
     }
 
+    // Bring to Front: Cmd+Shift+]
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ']') {
+      e.preventDefault()
+      bringToFront()
+      return
+    }
+
+    // Bring Forward: Cmd+]
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === ']') {
+      e.preventDefault()
+      bringForward()
+      return
+    }
+
+    // Send Backward: Cmd+[
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === '[') {
+      e.preventDefault()
+      sendBackward()
+      return
+    }
+
+    // Send to Back: Cmd+Shift+[
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
+      e.preventDefault()
+      sendToBack()
+      return
+    }
+
     // ESC to cancel path drawing
     if (e.key === 'Escape' && currentTool === 'path') {
       toolManager.cancelDrawing()
       renderer.setPreview(null)
     }
+  }
+
+  function deleteSelectedShape() {
+    if (!renderer) return
+    const selectedIds = renderer.getSelectedIds()
+    if (selectedIds.length === 0) return
+
+    // Delete all selected shapes
+    for (const id of selectedIds) {
+      renderer.removeShape(id) // This uses Command pattern for undo/redo
+    }
+    renderer.selectShape(null)
   }
 
   function copyShape() {
@@ -476,6 +725,40 @@
     console.log('Shape pasted')
   }
 
+  function bringToFront() {
+    if (!renderer) return
+    const selectedIds = renderer.getSelectedIds()
+    for (const id of selectedIds) {
+      renderer.bringToFront(id)
+    }
+  }
+
+  function bringForward() {
+    if (!renderer) return
+    const selectedIds = renderer.getSelectedIds()
+    for (const id of selectedIds) {
+      renderer.bringForward(id)
+    }
+  }
+
+  function sendBackward() {
+    if (!renderer) return
+    const selectedIds = renderer.getSelectedIds()
+    // Reverse order to maintain relative ordering
+    for (let i = selectedIds.length - 1; i >= 0; i--) {
+      renderer.sendBackward(selectedIds[i])
+    }
+  }
+
+  function sendToBack() {
+    if (!renderer) return
+    const selectedIds = renderer.getSelectedIds()
+    // Reverse order to maintain relative ordering
+    for (let i = selectedIds.length - 1; i >= 0; i--) {
+      renderer.sendToBack(selectedIds[i])
+    }
+  }
+
   async function exportSVG() {
     if (!renderer) return
 
@@ -493,16 +776,86 @@
     }
   }
 
+  /**
+   * Save - Save to current file or prompt for new file if no current file
+   */
   async function saveSVG() {
+    if (!renderer) return
+
+    if (currentFilePath) {
+      // Save to existing file
+      const success = await saveToFile(currentFilePath)
+
+      // Notify Electron main process that save is complete
+      const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
+      if (ipcRenderer && success) {
+        ipcRenderer.send('save-completed')
+      }
+    } else {
+      // No current file, act like Save As
+      await saveSVGAs()
+
+      // Notify completion if saved successfully
+      const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
+      if (ipcRenderer && !isDirty) {
+        ipcRenderer.send('save-completed')
+      }
+    }
+  }
+
+  /**
+   * Save As - Always prompt for new file location
+   */
+  async function saveSVGAs() {
     if (!renderer) return
 
     const svgString = renderer.exportSVG()
     const result = await saveSVGFile(svgString)
 
     if (result.success && !result.canceled) {
-      alert(`SVG saved successfully!${result.filePath !== 'clipboard' ? `\nLocation: ${result.filePath}` : '\n(Copied to clipboard in browser mode)'}`)
+      if (result.filePath && result.filePath !== 'clipboard') {
+        currentFilePath = result.filePath
+        isDirty = false
+        alert(`SVG saved successfully!\nLocation: ${result.filePath}`)
+      } else {
+        alert('SVG copied to clipboard')
+      }
     } else if (result.error) {
       alert(`Failed to save SVG: ${result.error}`)
+    }
+  }
+
+  /**
+   * Save to specific file path (for Save to existing file)
+   * Returns true if save was successful
+   */
+  async function saveToFile(filePath: string): Promise<boolean> {
+    if (!renderer) return false
+
+    const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
+
+    if (!ipcRenderer) {
+      // Browser mode - fall back to Save As
+      await saveSVGAs()
+      return !isDirty
+    }
+
+    try {
+      const svgString = renderer.exportSVG()
+      // Use IPC to save file directly without dialog
+      const result = await ipcRenderer.invoke('save-svg-direct', svgString, filePath)
+
+      if (result.success) {
+        isDirty = false
+        console.log(`Saved to ${filePath}`)
+        return true
+      } else {
+        throw new Error(result.error || 'Failed to save')
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error)
+      alert(`Failed to save file: ${error}`)
+      return false
     }
   }
 
@@ -525,6 +878,8 @@
 
         if (result.success && result.content) {
           loadSVG(result.content)
+          currentFilePath = result.filePath
+          isDirty = false
           console.log('SVG loaded from:', result.filePath)
         } else if (!result.canceled) {
           alert('Failed to load SVG file')
@@ -733,6 +1088,51 @@
 
     console.log('SVG loaded successfully')
   }
+
+  /**
+   * Handle file drop events
+   */
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy'
+    }
+  }
+
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+
+    const file = files[0]
+
+    // Check if it's an SVG file
+    if (!file.name.endsWith('.svg') && !file.type.includes('svg')) {
+      alert('Please drop an SVG file')
+      return
+    }
+
+    // Check for unsaved changes
+    if (isDirty) {
+      const shouldContinue = confirm('You have unsaved changes. Loading a new file will discard them. Continue?')
+      if (!shouldContinue) return
+    }
+
+    // Read and load the file
+    try {
+      const text = await file.text()
+      loadSVG(text)
+      currentFilePath = null // File dropped, not from disk location
+      isDirty = false
+      console.log('SVG loaded from dropped file:', file.name)
+    } catch (err) {
+      console.error('Failed to load dropped SVG:', err)
+      alert('Failed to load SVG file')
+    }
+  }
 </script>
 
 <div class="app-container">
@@ -771,6 +1171,74 @@
         />
       </label>
     </div>
+
+    {#if isTextBoxSelected}
+      <div class="toolbar-section text-properties">
+        <label class="toolbar-label">
+          <span>フォント</span>
+          <select
+            value={selectedFontFamily}
+            onchange={(e) => updateFontFamily(e.currentTarget.value)}
+          >
+            <option value="Arial">Arial</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Courier New">Courier New</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Verdana">Verdana</option>
+            <option value="Comic Sans MS">Comic Sans MS</option>
+          </select>
+        </label>
+
+        <label class="toolbar-label">
+          <span>サイズ</span>
+          <input
+            type="number"
+            min="8"
+            max="144"
+            value={selectedFontSize}
+            oninput={(e) => updateFontSize(Number(e.currentTarget.value))}
+            style="width: 60px"
+          />
+        </label>
+
+        <button
+          class="style-button"
+          class:active={selectedFontWeight === 'bold'}
+          onclick={() => updateFontWeight(selectedFontWeight === 'bold' ? 'normal' : 'bold')}
+          title="Bold"
+        >
+          <strong>B</strong>
+        </button>
+
+        <button
+          class="style-button"
+          class:active={selectedFontStyle === 'italic'}
+          onclick={() => updateFontStyle(selectedFontStyle === 'italic' ? 'normal' : 'italic')}
+          title="Italic"
+        >
+          <em>I</em>
+        </button>
+
+        <button
+          class="style-button"
+          class:active={selectedTextDecoration === 'underline'}
+          onclick={() => updateTextDecoration(selectedTextDecoration === 'underline' ? 'none' : 'underline')}
+          title="Underline"
+        >
+          <u>U</u>
+        </button>
+
+        <label class="toolbar-label">
+          <span>文字色</span>
+          <input
+            type="color"
+            value={selectedFontColor}
+            oninput={(e) => updateFontColor(e.currentTarget.value)}
+          />
+        </label>
+      </div>
+    {/if}
 
   </header>
 
@@ -839,7 +1307,12 @@
       </div>
     </aside>
 
-    <main class="canvas-area" bind:this={canvasContainer}>
+    <main
+      class="canvas-area"
+      bind:this={canvasContainer}
+      ondragover={handleDragOver}
+      ondrop={handleDrop}
+    >
       <canvas
         bind:this={canvas}
         onmousedown={handleMouseDown}
@@ -944,6 +1417,56 @@
     font-size: 12px;
     color: #fff;
     font-weight: 600;
+  }
+
+  .toolbar-label select {
+    padding: 4px 8px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #3c3c3c;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .toolbar-label input[type="number"] {
+    padding: 4px 8px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #3c3c3c;
+    color: #fff;
+    font-size: 13px;
+  }
+
+  .style-button {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #3c3c3c;
+    color: #ccc;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+
+  .style-button:hover {
+    background: #4c4c4c;
+    border-color: #666;
+  }
+
+  .style-button.active {
+    background: #2196F3;
+    border-color: #2196F3;
+    color: #fff;
+  }
+
+  .text-properties {
+    border-left: 1px solid #444;
+    padding-left: 16px;
   }
 
   .main-content {

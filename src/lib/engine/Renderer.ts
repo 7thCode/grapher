@@ -1,25 +1,66 @@
 import type { Shape } from './Shape'
 import { Rect, Circle, Line, Path, TextBox } from './Shape'
 import { TransformControls, type HandleType } from './TransformControls'
+import {
+  CommandHistory,
+  AddShapeCommand,
+  RemoveShapeCommand,
+  MoveShapeCommand,
+  ResizeShapeCommand,
+  UpdatePropertiesCommand,
+} from './Command'
 
 export class Renderer {
   private shapes: Shape[] = []
-  private selectedId: string | null = null
+  private selectedIds: string[] = []
   private previewShape: Shape | null = null
   private transformControls: TransformControls | null = null
+  private commandHistory: CommandHistory = new CommandHistory()
+  private onChangeCallback: (() => void) | null = null
 
   constructor(
     private canvas: HTMLCanvasElement,
     private ctx: CanvasRenderingContext2D
   ) {}
 
-  addShape(shape: Shape) {
-    this.shapes.push(shape)
+  /**
+   * Set callback to be called when any change occurs
+   */
+  setOnChangeCallback(callback: () => void) {
+    this.onChangeCallback = callback
+  }
+
+  /**
+   * Notify that a change has occurred
+   */
+  private notifyChange() {
+    if (this.onChangeCallback) {
+      this.onChangeCallback()
+    }
+  }
+
+  addShape(shape: Shape, useCommand = true) {
+    if (useCommand) {
+      const command = new AddShapeCommand(shape, this.shapes)
+      this.commandHistory.execute(command)
+      this.notifyChange()
+    } else {
+      this.shapes.push(shape)
+    }
     this.render()
   }
 
-  removeShape(id: string) {
-    this.shapes = this.shapes.filter((s) => s.props.id !== id)
+  removeShape(id: string, useCommand = true) {
+    const shape = this.shapes.find((s) => s.props.id === id)
+    if (!shape) return
+
+    if (useCommand) {
+      const command = new RemoveShapeCommand(shape, this.shapes)
+      this.commandHistory.execute(command)
+      this.notifyChange()
+    } else {
+      this.shapes = this.shapes.filter((s) => s.props.id !== id)
+    }
     this.render()
   }
 
@@ -50,11 +91,27 @@ export class Renderer {
     this.render()
   }
 
-  selectShape(id: string | null) {
-    this.selectedId = id
+  selectShape(id: string | null, addToSelection = false) {
+    if (id === null) {
+      // Clear all selection
+      this.selectedIds = []
+      this.transformControls = null
+    } else if (addToSelection) {
+      // Toggle selection
+      const index = this.selectedIds.indexOf(id)
+      if (index >= 0) {
+        this.selectedIds.splice(index, 1)
+      } else {
+        this.selectedIds.push(id)
+      }
+    } else {
+      // Single selection (replace)
+      this.selectedIds = [id]
+    }
 
-    if (id) {
-      const shape = this.shapes.find((s) => s.props.id === id)
+    // Update transform controls for single selection only
+    if (this.selectedIds.length === 1) {
+      const shape = this.shapes.find((s) => s.props.id === this.selectedIds[0])
       if (shape) {
         this.transformControls = new TransformControls(shape)
       }
@@ -83,8 +140,16 @@ export class Renderer {
   }
 
   getSelectedShape(): Shape | null {
-    if (!this.selectedId) return null
-    return this.shapes.find((s) => s.props.id === this.selectedId) || null
+    if (this.selectedIds.length === 0) return null
+    return this.shapes.find((s) => s.props.id === this.selectedIds[0]) || null
+  }
+
+  getSelectedShapes(): Shape[] {
+    return this.shapes.filter((s) => this.selectedIds.includes(s.props.id))
+  }
+
+  getSelectedIds(): string[] {
+    return [...this.selectedIds]
   }
 
   updateShapeProperties(id: string, props: Partial<{
@@ -134,17 +199,17 @@ export class Renderer {
       this.ctx.restore()
     }
 
-    // Draw selection box and transform controls
-    if (this.selectedId) {
-      const selected = this.shapes.find((s) => s.props.id === this.selectedId)
+    // Draw selection boxes for all selected shapes
+    for (const id of this.selectedIds) {
+      const selected = this.shapes.find((s) => s.props.id === id)
       if (selected) {
         this.drawSelectionBox(selected)
-
-        // Draw transform controls (resize handles)
-        if (this.transformControls) {
-          this.transformControls.render(this.ctx)
-        }
       }
+    }
+
+    // Draw transform controls (resize handles) only for single selection
+    if (this.selectedIds.length === 1 && this.transformControls) {
+      this.transformControls.render(this.ctx)
     }
   }
 
@@ -181,5 +246,149 @@ export class Renderer {
 
   getShapes() {
     return this.shapes
+  }
+
+  /**
+   * Undo/Redo operations
+   */
+  undo(): boolean {
+    const result = this.commandHistory.undo()
+    if (result) {
+      this.render()
+      this.notifyChange()
+    }
+    return result
+  }
+
+  redo(): boolean {
+    const result = this.commandHistory.redo()
+    if (result) {
+      this.render()
+      this.notifyChange()
+    }
+    return result
+  }
+
+  canUndo(): boolean {
+    return this.commandHistory.canUndo()
+  }
+
+  canRedo(): boolean {
+    return this.commandHistory.canRedo()
+  }
+
+  /**
+   * 移動操作完了時に Command として記録
+   */
+  commitMove(id: string, totalDx: number, totalDy: number) {
+    const shape = this.shapes.find((s) => s.props.id === id)
+    if (!shape || (totalDx === 0 && totalDy === 0)) return
+
+    const command = new MoveShapeCommand(shape, totalDx, totalDy)
+    // 既に移動済みなので、executeせずに履歴に追加
+    this.commandHistory.recordExecuted(command)
+    this.notifyChange()
+  }
+
+  /**
+   * リサイズ操作完了時に Command として記録
+   */
+  commitResize(id: string, oldBounds: { x: number; y: number; width: number; height: number }) {
+    const shape = this.shapes.find((s) => s.props.id === id)
+    if (!shape) return
+
+    const newBounds = shape.getBounds()
+    // 変更がない場合はスキップ
+    if (
+      oldBounds.x === newBounds.x &&
+      oldBounds.y === newBounds.y &&
+      oldBounds.width === newBounds.width &&
+      oldBounds.height === newBounds.height
+    ) {
+      return
+    }
+
+    const command = new ResizeShapeCommand(shape, oldBounds, newBounds)
+    // 既にリサイズ済みなので、executeせずに履歴に追加
+    this.commandHistory.recordExecuted(command)
+    this.notifyChange()
+  }
+
+  /**
+   * プロパティ更新を Command として記録
+   */
+  commitUpdateProperties(
+    id: string,
+    oldProps: Partial<Shape['props']>,
+    newProps: Partial<Shape['props']>
+  ) {
+    const shape = this.shapes.find((s) => s.props.id === id)
+    if (!shape) return
+
+    const command = new UpdatePropertiesCommand(shape, oldProps, newProps)
+    this.commandHistory.execute(command)
+    this.notifyChange()
+  }
+
+  /**
+   * 履歴をクリア
+   */
+  clearHistory() {
+    this.commandHistory.clear()
+  }
+
+  /**
+   * Mark the current state as clean (saved)
+   * This is used to reset isDirty flag after saving
+   */
+  markClean() {
+    // CommandHistory に保存時点のインデックスを記録する機能が必要
+    // 今回は単純に、外部で isDirty = false を設定する方式にする
+    // 特に何もしない（Canvas.svelte で isDirty を直接管理）
+  }
+
+  /**
+   * Layer ordering operations
+   */
+  bringToFront(id: string) {
+    const index = this.shapes.findIndex((s) => s.props.id === id)
+    if (index === -1 || index === this.shapes.length - 1) return
+
+    const shape = this.shapes.splice(index, 1)[0]
+    this.shapes.push(shape)
+    this.render()
+    this.notifyChange()
+  }
+
+  sendToBack(id: string) {
+    const index = this.shapes.findIndex((s) => s.props.id === id)
+    if (index === -1 || index === 0) return
+
+    const shape = this.shapes.splice(index, 1)[0]
+    this.shapes.unshift(shape)
+    this.render()
+    this.notifyChange()
+  }
+
+  bringForward(id: string) {
+    const index = this.shapes.findIndex((s) => s.props.id === id)
+    if (index === -1 || index === this.shapes.length - 1) return
+
+    const shape = this.shapes[index]
+    this.shapes[index] = this.shapes[index + 1]
+    this.shapes[index + 1] = shape
+    this.render()
+    this.notifyChange()
+  }
+
+  sendBackward(id: string) {
+    const index = this.shapes.findIndex((s) => s.props.id === id)
+    if (index === -1 || index === 0) return
+
+    const shape = this.shapes[index]
+    this.shapes[index] = this.shapes[index - 1]
+    this.shapes[index - 1] = shape
+    this.render()
+    this.notifyChange()
   }
 }

@@ -14,6 +14,7 @@ process.env.VITE_PUBLIC = app.isPackaged
   : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null
+let pendingClose = false
 
 function createMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -29,10 +30,17 @@ function createMenu() {
           }
         },
         {
-          label: 'Save...',
+          label: 'Save',
           accelerator: 'CmdOrCtrl+S',
           click: () => {
             win?.webContents.send('menu-save')
+          }
+        },
+        {
+          label: 'Save As...',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => {
+            win?.webContents.send('menu-save-as')
           }
         },
         { type: 'separator' },
@@ -49,6 +57,21 @@ function createMenu() {
       label: 'Edit',
       submenu: [
         {
+          label: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => {
+            win?.webContents.send('menu-undo')
+          }
+        },
+        {
+          label: 'Redo',
+          accelerator: 'CmdOrCtrl+Shift+Z',
+          click: () => {
+            win?.webContents.send('menu-redo')
+          }
+        },
+        { type: 'separator' },
+        {
           label: 'Copy',
           accelerator: 'CmdOrCtrl+C',
           click: () => {
@@ -60,6 +83,35 @@ function createMenu() {
           accelerator: 'CmdOrCtrl+V',
           click: () => {
             win?.webContents.send('menu-paste')
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Bring to Front',
+          accelerator: 'CmdOrCtrl+Shift+]',
+          click: () => {
+            win?.webContents.send('menu-bring-to-front')
+          }
+        },
+        {
+          label: 'Bring Forward',
+          accelerator: 'CmdOrCtrl+]',
+          click: () => {
+            win?.webContents.send('menu-bring-forward')
+          }
+        },
+        {
+          label: 'Send Backward',
+          accelerator: 'CmdOrCtrl+[',
+          click: () => {
+            win?.webContents.send('menu-send-backward')
+          }
+        },
+        {
+          label: 'Send to Back',
+          accelerator: 'CmdOrCtrl+Shift+[',
+          click: () => {
+            win?.webContents.send('menu-send-to-back')
           }
         }
       ]
@@ -107,6 +159,45 @@ function createWindow() {
     win.loadFile(path.join(process.env.DIST, 'index.html'))
   }
 
+  // Handle window close event - check for unsaved changes
+  win.on('close', async (e) => {
+    if (!win || pendingClose) return
+
+    // Prevent default close
+    e.preventDefault()
+
+    // Ask renderer process if there are unsaved changes
+    const response = await win.webContents.executeJavaScript(
+      'window.isDirty !== undefined ? window.isDirty : false'
+    )
+
+    if (response === true) {
+      // There are unsaved changes - show dialog
+      const choice = await dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: ['Save', 'Don\'t Save', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        title: 'Unsaved Changes',
+        message: 'Do you want to save the changes before closing?',
+        detail: 'Your changes will be lost if you don\'t save them.'
+      })
+
+      if (choice.response === 0) {
+        // Save - wait for save-completed event
+        pendingClose = true
+        win.webContents.send('menu-save')
+      } else if (choice.response === 1) {
+        // Don't Save
+        win.destroy()
+      }
+      // Cancel: do nothing
+    } else {
+      // No unsaved changes - close immediately
+      win.destroy()
+    }
+  })
+
   win.on('closed', () => {
     win = null
   })
@@ -126,6 +217,13 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
+  }
+})
+
+// Handle save-completed event from renderer
+ipcMain.on('save-completed', () => {
+  if (win) {
+    win.destroy()
   }
 })
 
@@ -153,7 +251,7 @@ ipcMain.handle('load-svg', async () => {
   }
 })
 
-// IPC handler for saving SVG files
+// IPC handler for saving SVG files (with dialog)
 ipcMain.handle('save-svg', async (_event, svgContent: string) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: 'Save SVG File',
@@ -168,6 +266,17 @@ ipcMain.handle('save-svg', async (_event, svgContent: string) => {
     return { success: false, canceled: true }
   }
 
+  try {
+    fs.writeFileSync(filePath, svgContent, 'utf-8')
+    return { success: true, filePath }
+  } catch (error) {
+    console.error('Error saving file:', error)
+    return { success: false, error: String(error) }
+  }
+})
+
+// IPC handler for saving SVG files directly (without dialog)
+ipcMain.handle('save-svg-direct', async (_event, svgContent: string, filePath: string) => {
   try {
     fs.writeFileSync(filePath, svgContent, 'utf-8')
     return { success: true, filePath }
