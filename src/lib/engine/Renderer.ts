@@ -26,6 +26,7 @@ export class Renderer {
   private snapGuides: SnapGuide[] = []
   private alignManager: AlignManager = new AlignManager()
   private pathEditManager: PathEditManager = new PathEditManager()
+  private selectionRect: { x: number; y: number; width: number; height: number } | null = null
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -233,6 +234,27 @@ export class Renderer {
     const editingPath = this.pathEditManager.getEditingPath()
     if (editingPath) {
       this.pathEditManager.render(this.ctx)
+    }
+
+    // Draw selection rectangle for drag selection
+    if (this.selectionRect) {
+      this.ctx.save()
+      this.ctx.strokeStyle = '#2196F3'
+      this.ctx.lineWidth = 2
+      this.ctx.fillStyle = 'rgba(33, 150, 243, 0.15)'
+      this.ctx.fillRect(
+        this.selectionRect.x,
+        this.selectionRect.y,
+        this.selectionRect.width,
+        this.selectionRect.height
+      )
+      this.ctx.strokeRect(
+        this.selectionRect.x,
+        this.selectionRect.y,
+        this.selectionRect.width,
+        this.selectionRect.height
+      )
+      this.ctx.restore()
     }
   }
 
@@ -586,5 +608,20 @@ export class Renderer {
     this.shapes[index - 1] = shape
     this.render()
     this.notifyChange()
+  }
+
+  /**
+   * Set selection rectangle for drag selection
+   */
+  setSelectionRect(rect: { x: number; y: number; width: number; height: number } | null) {
+    this.selectionRect = rect
+    this.render()
+  }
+
+  /**
+   * Get selection rectangle
+   */
+  getSelectionRect() {
+    return this.selectionRect
   }
 }

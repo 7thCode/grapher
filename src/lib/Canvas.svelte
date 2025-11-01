@@ -463,6 +463,8 @@
           width: maxX - minX,
           height: maxY - minY
         }
+        // Update renderer's selection rectangle
+        renderer.setSelectionRect(selectionRect)
       } else if (isRotating) {
         // Rotating shape
         renderer.rotateShape(x, y)
@@ -558,6 +560,7 @@
         // Reset selection rectangle state
         isSelectingArea = false
         selectionRect = { x: 0, y: 0, width: 0, height: 0 }
+        renderer.setSelectionRect(null)
       }
 
       // Commit move/resize to Command history
@@ -1629,21 +1632,6 @@
         onmouseleave={handleMouseUp}
         ondblclick={handleDblClick}
       ></canvas>
-
-      <!-- Selection rectangle overlay -->
-      {#if isSelectingArea && canvas}
-        {@const rect = canvas.getBoundingClientRect()}
-        {@const containerRect = canvasContainer.getBoundingClientRect()}
-        <div
-          class="selection-overlay"
-          style="
-            left: {selectionRect.x + (rect.left - containerRect.left)}px;
-            top: {selectionRect.y + (rect.top - containerRect.top)}px;
-            width: {selectionRect.width}px;
-            height: {selectionRect.height}px;
-          "
-        ></div>
-      {/if}
     </main>
   </div>
 </div>
@@ -1933,15 +1921,5 @@
     cursor: crosshair;
     margin: 0;
     display: block;
-    position: relative;
-    z-index: 1;
-  }
-
-  .selection-overlay {
-    position: absolute;
-    pointer-events: none;
-    background: rgba(33, 150, 243, 0.15);
-    border: 2px solid #2196F3;
-    z-index: 100;
   }
 </style>
