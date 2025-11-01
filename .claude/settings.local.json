@@ -15,7 +15,9 @@
       "Bash(npm run check:*)",
       "mcp__serena__read_memory",
       "Bash(pkill:*)",
-      "mcp__serena__search_for_pattern"
+      "mcp__serena__search_for_pattern",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

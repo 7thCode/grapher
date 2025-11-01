@@ -323,7 +323,7 @@
     // Create editing div overlay
     const editorDiv = document.createElement('div')
     editorDiv.contentEditable = 'true'
-    editorDiv.textContent = textBox.props.text
+    editorDiv.innerHTML = textBox.props.text.replace(/\n/g, '<br>')
     editorDiv.style.position = 'absolute'
     editorDiv.style.left = `${textBox.props.x}px`
     editorDiv.style.top = `${textBox.props.y}px`
@@ -365,7 +365,17 @@
     // Handle blur to finish editing
     const finishEditing = () => {
       if (editingTextBox && textEditorDiv) {
-        editingTextBox.props.text = textEditorDiv.textContent || 'Text'
+        // Convert HTML back to plain text with newlines
+        const htmlContent = textEditorDiv.innerHTML
+        const textWithNewlines = htmlContent
+          .replace(/<div>/gi, '\n')
+          .replace(/<\/div>/gi, '')
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<[^>]*>/g, '')
+          .trim()
+
+        editingTextBox.props.text = textWithNewlines || 'Text'
+
         textEditorDiv.remove()
         textEditorDiv = null
         editingTextBox = null

@@ -351,24 +351,34 @@ export class TextBox {
     ctx.fillStyle = fontColor
     ctx.textBaseline = 'top'
 
-    // Word wrap implementation
-    const words = text.split(' ')
+    // Word wrap implementation with newline support
+    const paragraphs = text.split('\n')
     const lines: string[] = []
-    let currentLine = ''
 
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word
-      const metrics = ctx.measureText(testLine)
-
-      if (metrics.width > width - 10 && currentLine) {
-        lines.push(currentLine)
-        currentLine = word
-      } else {
-        currentLine = testLine
+    for (const paragraph of paragraphs) {
+      // Handle empty paragraphs (blank lines)
+      if (paragraph.trim() === '') {
+        lines.push('')
+        continue
       }
-    }
-    if (currentLine) {
-      lines.push(currentLine)
+
+      const words = paragraph.split(' ')
+      let currentLine = ''
+
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word
+        const metrics = ctx.measureText(testLine)
+
+        if (metrics.width > width - 10 && currentLine) {
+          lines.push(currentLine)
+          currentLine = word
+        } else {
+          currentLine = testLine
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine)
+      }
     }
 
     // Draw text lines
