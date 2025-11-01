@@ -51,6 +51,20 @@
   let currentFilePath: string | null = null
   let isDirty = false
 
+  // Snap settings
+  let snapEnabled = true
+  let gridEnabled = true
+
+  $: {
+    if (renderer) {
+      const snapManager = renderer.getSnapManager()
+      snapManager.setSettings({
+        enabled: snapEnabled,
+        gridEnabled: gridEnabled,
+      })
+    }
+  }
+
   // Expose isDirty to window for Electron main process
   $: {
     if (typeof window !== 'undefined') {
@@ -282,6 +296,14 @@
           console.log('Received menu-send-to-back event')
           sendToBack()
         })
+        ipcRenderer.on('menu-group', () => {
+          console.log('Received menu-group event')
+          groupShapes()
+        })
+        ipcRenderer.on('menu-ungroup', () => {
+          console.log('Received menu-ungroup event')
+          ungroupShapes()
+        })
 
         console.log('IPC listeners registered successfully')
 
@@ -299,6 +321,8 @@
           ipcRenderer.removeAllListeners('menu-bring-forward')
           ipcRenderer.removeAllListeners('menu-send-backward')
           ipcRenderer.removeAllListeners('menu-send-to-back')
+          ipcRenderer.removeAllListeners('menu-group')
+          ipcRenderer.removeAllListeners('menu-ungroup')
         }
       } else {
         console.log('ipcRenderer not available - not running in Electron')
@@ -402,19 +426,28 @@
         renderer.resizeShape(resizeHandle, dx, dy)
         dragStart = { x, y }
       } else if (isDragging) {
-        // Dragging shape(s)
-        const dx = x - dragStart.x
-        const dy = y - dragStart.y
+        // Dragging shape(s) with snapping
+        const selectedIds = renderer.getSelectedIds()
+
+        // Snap to grid/shapes
+        const snapResult = renderer.snapPoint(x, y, selectedIds)
+        const snappedX = snapResult.x
+        const snappedY = snapResult.y
+
+        // Set snap guides
+        renderer.setSnapGuides(snapResult.guides)
+
+        const dx = snappedX - dragStart.x
+        const dy = snappedY - dragStart.y
 
         // Move all selected shapes
-        const selectedIds = renderer.getSelectedIds()
         for (const id of selectedIds) {
           renderer.moveShape(id, dx, dy)
         }
 
         totalMoveOffset.dx += dx  // Accumulate total movement
         totalMoveOffset.dy += dy
-        dragStart = { x, y }
+        dragStart = { x: snappedX, y: snappedY }
       }
     } else if (currentTool === 'path') {
       // Path tool: update preview with current mouse position
@@ -463,6 +496,9 @@
       draggedShapeId = null
       resizeHandle = null
       resizeStartBounds = null
+
+      // Clear snap guides
+      renderer.clearSnapGuides()
     } else if (currentTool === 'path') {
       // Path tool: do nothing on mouse up (continue drawing)
     } else if (currentTool === 'text') {
@@ -645,6 +681,20 @@
       return
     }
 
+    // Group: Cmd+G
+    if ((e.metaKey || e.ctrlKey) && e.key === 'g' && !e.shiftKey) {
+      e.preventDefault()
+      groupShapes()
+      return
+    }
+
+    // Ungroup: Cmd+Shift+G
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'g') {
+      e.preventDefault()
+      ungroupShapes()
+      return
+    }
+
     // ESC to cancel path drawing
     if (e.key === 'Escape' && currentTool === 'path') {
       toolManager.cancelDrawing()
@@ -757,6 +807,16 @@
     for (let i = selectedIds.length - 1; i >= 0; i--) {
       renderer.sendToBack(selectedIds[i])
     }
+  }
+
+  function groupShapes() {
+    if (!renderer) return
+    renderer.groupShapes()
+  }
+
+  function ungroupShapes() {
+    if (!renderer) return
+    renderer.ungroupShapes()
   }
 
   async function exportSVG() {
@@ -1240,6 +1300,46 @@
       </div>
     {/if}
 
+    <!-- Snap Settings -->
+    <div class="toolbar-section snap-settings">
+      <label class="toolbar-label">
+        <input
+          type="checkbox"
+          bind:checked={snapEnabled}
+        />
+        <span>スナップ</span>
+      </label>
+
+      <label class="toolbar-label">
+        <input
+          type="checkbox"
+          bind:checked={gridEnabled}
+          disabled={!snapEnabled}
+        />
+        <span>グリッド</span>
+      </label>
+    </div>
+
+    <!-- Alignment Tools (shown when multiple shapes selected) -->
+    {#if hasSelection && renderer && renderer.getSelectedIds().length >= 2}
+      <div class="toolbar-section align-tools">
+        <span class="section-label">整列:</span>
+        <button class="tool-button" onclick={() => renderer.alignShapes('left')} title="左揃え">⬅</button>
+        <button class="tool-button" onclick={() => renderer.alignShapes('center')} title="中央揃え(横)">↔</button>
+        <button class="tool-button" onclick={() => renderer.alignShapes('right')} title="右揃え">➡</button>
+        <button class="tool-button" onclick={() => renderer.alignShapes('top')} title="上揃え">⬆</button>
+        <button class="tool-button" onclick={() => renderer.alignShapes('middle')} title="中央揃え(縦)">↕</button>
+        <button class="tool-button" onclick={() => renderer.alignShapes('bottom')} title="下揃え">⬇</button>
+
+        {#if renderer.getSelectedIds().length >= 3}
+          <span class="separator">|</span>
+          <span class="section-label">分配:</span>
+          <button class="tool-button" onclick={() => renderer.distributeShapes('horizontal')} title="水平分配">⬌</button>
+          <button class="tool-button" onclick={() => renderer.distributeShapes('vertical')} title="垂直分配">⬍</button>
+        {/if}
+      </div>
+    {/if}
+
   </header>
 
   <!-- Hidden file input for loading SVG -->
@@ -1467,6 +1567,30 @@
   .text-properties {
     border-left: 1px solid #444;
     padding-left: 16px;
+  }
+
+  .snap-settings {
+    border-left: 1px solid #444;
+    padding-left: 16px;
+  }
+
+  .align-tools {
+    border-left: 1px solid #444;
+    padding-left: 16px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .section-label {
+    font-size: 12px;
+    color: #999;
+    margin-right: 4px;
+  }
+
+  .separator {
+    color: #666;
+    margin: 0 8px;
   }
 
   .main-content {

@@ -113,6 +113,21 @@ function createMenu() {
           click: () => {
             win?.webContents.send('menu-send-to-back')
           }
+        },
+        { type: 'separator' },
+        {
+          label: 'Group',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => {
+            win?.webContents.send('menu-group')
+          }
+        },
+        {
+          label: 'Ungroup',
+          accelerator: 'CmdOrCtrl+Shift+G',
+          click: () => {
+            win?.webContents.send('menu-ungroup')
+          }
         }
       ]
     },

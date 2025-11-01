@@ -1,5 +1,5 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line, Path, TextBox } from './Shape'
+import { Rect, Circle, Line, Path, TextBox, Group } from './Shape'
 
 /**
  * Command Interface - Undo/Redo システムの基底インターフェース
@@ -104,6 +104,15 @@ export class MoveShapeCommand implements Command {
       this.shape.props.y1 += dy
       this.shape.props.x2 += dx
       this.shape.props.y2 += dy
+    } else if (this.shape instanceof Group) {
+      // Move all children in the group
+      for (const child of this.shape.props.children) {
+        const childCommand = new MoveShapeCommand(child, dx, dy)
+        childCommand.execute()
+      }
+      // Update group position
+      this.shape.props.x += dx
+      this.shape.props.y += dy
     }
   }
 
@@ -190,6 +199,139 @@ export class UpdatePropertiesCommand implements Command {
 
   getDescription(): string {
     return `Update ${this.shape.type} properties`
+  }
+}
+
+/**
+ * GroupCommand - 図形グループ化コマンド
+ */
+export class GroupCommand implements Command {
+  private group: Group
+  private shapes: Shape[]
+  private childShapes: Shape[]
+  private childIndices: number[]
+
+  constructor(childShapes: Shape[], shapes: Shape[]) {
+    this.childShapes = childShapes
+    this.shapes = shapes
+    this.childIndices = childShapes.map((child) => shapes.indexOf(child))
+
+    // Create new group with unique ID
+    const groupId = `group-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const bounds = this.calculateBounds(childShapes)
+
+    this.group = new Group({
+      id: groupId,
+      x: bounds.x,
+      y: bounds.y,
+      children: [...childShapes],
+    })
+  }
+
+  execute(): void {
+    // Remove child shapes from main shapes array
+    for (const child of this.childShapes) {
+      const index = this.shapes.indexOf(child)
+      if (index !== -1) {
+        this.shapes.splice(index, 1)
+      }
+    }
+
+    // Add group to shapes array
+    this.shapes.push(this.group)
+  }
+
+  undo(): void {
+    // Remove group from shapes array
+    const groupIndex = this.shapes.indexOf(this.group)
+    if (groupIndex !== -1) {
+      this.shapes.splice(groupIndex, 1)
+    }
+
+    // Restore child shapes at their original indices
+    const sortedIndices = [...this.childIndices].sort((a, b) => a - b)
+    for (let i = 0; i < sortedIndices.length; i++) {
+      this.shapes.splice(sortedIndices[i], 0, this.childShapes[i])
+    }
+  }
+
+  private calculateBounds(shapes: Shape[]) {
+    if (shapes.length === 0) {
+      return { x: 0, y: 0, width: 0, height: 0 }
+    }
+
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+
+    for (const shape of shapes) {
+      const bounds = shape.getBounds()
+      minX = Math.min(minX, bounds.x)
+      minY = Math.min(minY, bounds.y)
+      maxX = Math.max(maxX, bounds.x + bounds.width)
+      maxY = Math.max(maxY, bounds.y + bounds.height)
+    }
+
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    }
+  }
+
+  getDescription(): string {
+    return `Group ${this.childShapes.length} shapes`
+  }
+
+  getGroup(): Group {
+    return this.group
+  }
+}
+
+/**
+ * UngroupCommand - グループ解除コマンド
+ */
+export class UngroupCommand implements Command {
+  private group: Group
+  private shapes: Shape[]
+  private groupIndex: number
+  private children: Shape[]
+
+  constructor(group: Group, shapes: Shape[]) {
+    this.group = group
+    this.shapes = shapes
+    this.groupIndex = shapes.indexOf(group)
+    this.children = [...group.props.children]
+  }
+
+  execute(): void {
+    // Remove group from shapes array
+    const index = this.shapes.indexOf(this.group)
+    if (index !== -1) {
+      this.shapes.splice(index, 1)
+    }
+
+    // Add all children to shapes array at the same position
+    this.shapes.splice(index, 0, ...this.children)
+  }
+
+  undo(): void {
+    // Remove all children
+    for (const child of this.children) {
+      const index = this.shapes.indexOf(child)
+      if (index !== -1) {
+        this.shapes.splice(index, 1)
+      }
+    }
+
+    // Restore group at original position
+    this.shapes.splice(this.groupIndex, 0, this.group)
+  }
+
+  getDescription(): string {
+    return `Ungroup ${this.children.length} shapes`
   }
 }
 

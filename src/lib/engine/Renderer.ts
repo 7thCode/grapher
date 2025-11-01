@@ -1,5 +1,5 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line, Path, TextBox } from './Shape'
+import { Rect, Circle, Line, Path, TextBox, Group } from './Shape'
 import { TransformControls, type HandleType } from './TransformControls'
 import {
   CommandHistory,
@@ -8,7 +8,11 @@ import {
   MoveShapeCommand,
   ResizeShapeCommand,
   UpdatePropertiesCommand,
+  GroupCommand,
+  UngroupCommand,
 } from './Command'
+import { SnapManager, type SnapGuide } from './SnapManager'
+import { AlignManager, type AlignType, type DistributeType } from './AlignManager'
 
 export class Renderer {
   private shapes: Shape[] = []
@@ -17,6 +21,9 @@ export class Renderer {
   private transformControls: TransformControls | null = null
   private commandHistory: CommandHistory = new CommandHistory()
   private onChangeCallback: (() => void) | null = null
+  private snapManager: SnapManager = new SnapManager()
+  private snapGuides: SnapGuide[] = []
+  private alignManager: AlignManager = new AlignManager()
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -186,6 +193,9 @@ export class Renderer {
     // Clear canvas
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
+    // Draw grid
+    this.snapManager.drawGrid(this.ctx, this.canvas.width, this.canvas.height)
+
     // Draw all shapes
     for (const shape of this.shapes) {
       shape.render(this.ctx)
@@ -197,6 +207,11 @@ export class Renderer {
       this.ctx.globalAlpha = 0.5
       this.previewShape.render(this.ctx)
       this.ctx.restore()
+    }
+
+    // Draw snap guides
+    if (this.snapGuides.length > 0) {
+      this.snapManager.drawGuides(this.ctx, this.snapGuides, this.canvas.width, this.canvas.height)
     }
 
     // Draw selection boxes for all selected shapes
@@ -368,6 +383,149 @@ export class Renderer {
     this.shapes.unshift(shape)
     this.render()
     this.notifyChange()
+  }
+
+  /**
+   * Group selected shapes
+   */
+  groupShapes(): void {
+    const selectedShapes = this.getSelectedShapes()
+    
+    if (selectedShapes.length < 2) {
+      console.warn('Need at least 2 shapes to group')
+      return
+    }
+
+    const command = new GroupCommand(selectedShapes, this.shapes)
+    this.commandHistory.execute(command)
+    this.notifyChange()
+
+    // Select the newly created group
+    const group = command.getGroup()
+    this.selectedIds = [group.props.id]
+    
+    this.render()
+  }
+
+  /**
+   * Ungroup selected group
+   */
+  ungroupShapes(): void {
+    const selectedShapes = this.getSelectedShapes()
+    
+    for (const shape of selectedShapes) {
+      if (shape instanceof Group) {
+        const command = new UngroupCommand(shape, this.shapes)
+        this.commandHistory.execute(command)
+        this.notifyChange()
+      }
+    }
+
+    // Clear selection
+    this.selectedIds = []
+    this.render()
+  }
+
+  /**
+   * Check if selection contains a group
+   */
+  hasGroupSelected(): boolean {
+    const selectedShapes = this.getSelectedShapes()
+    return selectedShapes.some((shape) => shape instanceof Group)
+  }
+
+  /**
+   * Get snap manager
+   */
+  getSnapManager(): SnapManager {
+    return this.snapManager
+  }
+
+  /**
+   * Set snap guides to display
+   */
+  setSnapGuides(guides: SnapGuide[]) {
+    this.snapGuides = guides
+  }
+
+  /**
+   * Clear snap guides
+   */
+  clearSnapGuides() {
+    this.snapGuides = []
+  }
+
+  /**
+   * Snap point with current settings
+   */
+  snapPoint(x: number, y: number, excludeIds: string[] = []) {
+    return this.snapManager.snap(x, y, this.shapes, excludeIds)
+  }
+
+  /**
+   * Align selected shapes
+   */
+  alignShapes(type: AlignType) {
+    const selectedShapes = this.getSelectedShapes()
+    if (selectedShapes.length < 2) {
+      console.warn('Need at least 2 shapes to align')
+      return
+    }
+
+    // Store old positions for undo
+    const oldBounds = selectedShapes.map((s) => s.getBounds())
+
+    // Align shapes
+    this.alignManager.alignShapes(selectedShapes, type)
+
+    // Store new positions for undo
+    const newBounds = selectedShapes.map((s) => s.getBounds())
+
+    // Create compound command for all movements
+    for (let i = 0; i < selectedShapes.length; i++) {
+      const dx = newBounds[i].x - oldBounds[i].x
+      const dy = newBounds[i].y - oldBounds[i].y
+      if (dx !== 0 || dy !== 0) {
+        const command = new MoveShapeCommand(selectedShapes[i], dx, dy)
+        this.commandHistory.recordExecuted(command)
+      }
+    }
+
+    this.notifyChange()
+    this.render()
+  }
+
+  /**
+   * Distribute selected shapes
+   */
+  distributeShapes(type: DistributeType) {
+    const selectedShapes = this.getSelectedShapes()
+    if (selectedShapes.length < 3) {
+      console.warn('Need at least 3 shapes to distribute')
+      return
+    }
+
+    // Store old positions
+    const oldBounds = selectedShapes.map((s) => s.getBounds())
+
+    // Distribute shapes
+    this.alignManager.distributeShapes(selectedShapes, type)
+
+    // Store new positions for undo
+    const newBounds = selectedShapes.map((s) => s.getBounds())
+
+    // Create compound command
+    for (let i = 0; i < selectedShapes.length; i++) {
+      const dx = newBounds[i].x - oldBounds[i].x
+      const dy = newBounds[i].y - oldBounds[i].y
+      if (dx !== 0 || dy !== 0) {
+        const command = new MoveShapeCommand(selectedShapes[i], dx, dy)
+        this.commandHistory.recordExecuted(command)
+      }
+    }
+
+    this.notifyChange()
+    this.render()
   }
 
   bringForward(id: string) {

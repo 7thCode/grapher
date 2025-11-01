@@ -429,4 +429,121 @@ export class TextBox {
   }
 }
 
-export type Shape = Rect | Circle | Line | Path | TextBox
+/**
+ * Group - Composite pattern for grouping shapes
+ */
+export interface GroupProps extends ShapeProps {
+  children: Shape[]
+}
+
+export class Group {
+  type = 'group' as const
+
+  constructor(public props: GroupProps) {}
+
+  render(ctx: CanvasRenderingContext2D) {
+    const { rotation = 0 } = this.props
+
+    ctx.save()
+
+    // Apply rotation if needed
+    if (rotation !== 0) {
+      const bounds = this.getBounds()
+      const centerX = bounds.x + bounds.width / 2
+      const centerY = bounds.y + bounds.height / 2
+      ctx.translate(centerX, centerY)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.translate(-centerX, -centerY)
+    }
+
+    // Render all children
+    for (const child of this.props.children) {
+      child.render(ctx)
+    }
+
+    ctx.restore()
+  }
+
+  containsPoint(px: number, py: number): boolean {
+    // Check if any child contains the point
+    return this.props.children.some((child) => child.containsPoint(px, py))
+  }
+
+  toSVG(): string {
+    const { rotation = 0, children } = this.props
+    const bounds = this.getBounds()
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+
+    const childrenSVG = children.map((child) => child.toSVG()).join('\n  ')
+
+    if (rotation !== 0) {
+      return `<g transform="rotate(${rotation} ${centerX} ${centerY})">
+  ${childrenSVG}
+</g>`
+    }
+
+    return `<g>
+  ${childrenSVG}
+</g>`
+  }
+
+  getBounds() {
+    if (this.props.children.length === 0) {
+      return { x: this.props.x, y: this.props.y, width: 0, height: 0 }
+    }
+
+    // Calculate bounding box of all children
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+
+    for (const child of this.props.children) {
+      const bounds = child.getBounds()
+      minX = Math.min(minX, bounds.x)
+      minY = Math.min(minY, bounds.y)
+      maxX = Math.max(maxX, bounds.x + bounds.width)
+      maxY = Math.max(maxY, bounds.y + bounds.height)
+    }
+
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    }
+  }
+
+  /**
+   * Get all child IDs (including nested groups)
+   */
+  getAllChildIds(): string[] {
+    const ids: string[] = []
+    for (const child of this.props.children) {
+      ids.push(child.props.id)
+      if (child instanceof Group) {
+        ids.push(...child.getAllChildIds())
+      }
+    }
+    return ids
+  }
+
+  /**
+   * Find a child shape by ID (including nested groups)
+   */
+  findChild(id: string): Shape | null {
+    for (const child of this.props.children) {
+      if (child.props.id === id) {
+        return child
+      }
+      if (child instanceof Group) {
+        const found = child.findChild(id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+}
+
+export type Shape = Rect | Circle | Line | Path | TextBox | Group
