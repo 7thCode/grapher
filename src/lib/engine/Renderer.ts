@@ -96,9 +96,38 @@ export class Renderer {
     } else if (shape instanceof TextBox) {
       shape.props.x += dx
       shape.props.y += dy
+    } else if (shape instanceof Group) {
+      // Move all children recursively
+      this.moveGroupChildren(shape, dx, dy)
     }
 
     this.render()
+  }
+
+  private moveGroupChildren(group: Group, dx: number, dy: number) {
+    for (const child of group.props.children) {
+      if (child instanceof Rect) {
+        child.props.x += dx
+        child.props.y += dy
+      } else if (child instanceof Circle) {
+        child.props.cx += dx
+        child.props.cy += dy
+      } else if (child instanceof Line) {
+        child.props.x1 += dx
+        child.props.y1 += dy
+        child.props.x2 += dx
+        child.props.y2 += dy
+      } else if (child instanceof Path) {
+        child.props.x += dx
+        child.props.y += dy
+      } else if (child instanceof TextBox) {
+        child.props.x += dx
+        child.props.y += dy
+      } else if (child instanceof Group) {
+        // Recursively move nested groups
+        this.moveGroupChildren(child, dx, dy)
+      }
+    }
   }
 
   selectShape(id: string | null, addToSelection = false) {

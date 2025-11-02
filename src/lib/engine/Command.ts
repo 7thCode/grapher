@@ -105,14 +105,11 @@ export class MoveShapeCommand implements Command {
       this.shape.props.x2 += dx
       this.shape.props.y2 += dy
     } else if (this.shape instanceof Group) {
-      // Move all children in the group
+      // Move all children in the group recursively
       for (const child of this.shape.props.children) {
         const childCommand = new MoveShapeCommand(child, dx, dy)
         childCommand.execute()
       }
-      // Update group position
-      this.shape.props.x += dx
-      this.shape.props.y += dy
     }
   }
 
@@ -167,6 +164,103 @@ export class ResizeShapeCommand implements Command {
       this.shape.props.y1 = bounds.y
       this.shape.props.x2 = bounds.x + bounds.width
       this.shape.props.y2 = bounds.y + bounds.height
+    } else if (this.shape instanceof Group) {
+      // For groups, calculate scale factors and apply recursively to all children
+      const currentBounds = this.shape.getBounds()
+      
+      // Avoid division by zero
+      if (currentBounds.width === 0 || currentBounds.height === 0) {
+        return
+      }
+      
+      const scaleX = bounds.width / currentBounds.width
+      const scaleY = bounds.height / currentBounds.height
+      
+      // Origin point is the top-left of the current bounds
+      const originX = currentBounds.x
+      const originY = currentBounds.y
+      
+      // Target origin is the top-left of the new bounds
+      const targetX = bounds.x
+      const targetY = bounds.y
+      
+      // Recursively scale all children
+      this.scaleGroupChildren(this.shape, scaleX, scaleY, originX, originY, targetX, targetY)
+    }
+  }
+
+  private scaleGroupChildren(
+    group: Group,
+    scaleX: number,
+    scaleY: number,
+    originX: number,
+    originY: number,
+    targetX: number,
+    targetY: number
+  ): void {
+    for (const child of group.props.children) {
+      if (child instanceof Rect) {
+        const relX = child.props.x - originX
+        const relY = child.props.y - originY
+        child.props.x = targetX + relX * scaleX
+        child.props.y = targetY + relY * scaleY
+        child.props.width *= scaleX
+        child.props.height *= scaleY
+      } else if (child instanceof Circle) {
+        const relX = child.props.cx - originX
+        const relY = child.props.cy - originY
+        child.props.cx = targetX + relX * scaleX
+        child.props.cy = targetY + relY * scaleY
+        child.props.r *= Math.min(scaleX, scaleY)
+      } else if (child instanceof Line) {
+        const relX1 = child.props.x1 - originX
+        const relY1 = child.props.y1 - originY
+        const relX2 = child.props.x2 - originX
+        const relY2 = child.props.y2 - originY
+        child.props.x1 = targetX + relX1 * scaleX
+        child.props.y1 = targetY + relY1 * scaleY
+        child.props.x2 = targetX + relX2 * scaleX
+        child.props.y2 = targetY + relY2 * scaleY
+      } else if (child instanceof TextBox) {
+        const relX = child.props.x - originX
+        const relY = child.props.y - originY
+        child.props.x = targetX + relX * scaleX
+        child.props.y = targetY + relY * scaleY
+        child.props.width *= scaleX
+        child.props.height *= scaleY
+        child.props.fontSize *= Math.min(scaleX, scaleY)
+      } else if (child instanceof Path) {
+        for (const point of child.props.points) {
+          const relX = point.x - originX
+          const relY = point.y - originY
+          point.x = targetX + relX * scaleX
+          point.y = targetY + relY * scaleY
+
+          // Scale control points if present
+          if (point.cp1x !== undefined && point.cp1y !== undefined) {
+            const relCp1X = point.cp1x - originX
+            const relCp1Y = point.cp1y - originY
+            point.cp1x = targetX + relCp1X * scaleX
+            point.cp1y = targetY + relCp1Y * scaleY
+          }
+          if (point.cp2x !== undefined && point.cp2y !== undefined) {
+            const relCp2X = point.cp2x - originX
+            const relCp2Y = point.cp2y - originY
+            point.cp2x = targetX + relCp2X * scaleX
+            point.cp2y = targetY + relCp2Y * scaleY
+          }
+          if (point.cpx !== undefined && point.cpy !== undefined) {
+            const relCpX = point.cpx - originX
+            const relCpY = point.cpy - originY
+            point.cpx = targetX + relCpX * scaleX
+            point.cpy = targetY + relCpY * scaleY
+          }
+        }
+        child.updatePathData()
+      } else if (child instanceof Group) {
+        // Recursively scale nested groups
+        this.scaleGroupChildren(child, scaleX, scaleY, originX, originY, targetX, targetY)
+      }
     }
   }
 

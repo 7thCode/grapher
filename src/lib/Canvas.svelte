@@ -230,9 +230,10 @@
     toolManager = new ToolManager()
     toolManager.setTool(currentTool)
 
-    // Set up change callback for isDirty tracking
+    // Set up change callback for isDirty tracking and re-rendering
     renderer.setOnChangeCallback(() => {
       setDirty(true)
+      renderer.render()
     })
 
     // Initial resize
@@ -1387,7 +1388,7 @@
           <span>フォント</span>
           <select
             value={selectedFontFamily}
-            onchange={(e) => updateFontFamily(e.currentTarget.value)}
+            oninput={(e) => updateFontFamily(e.currentTarget.value)}
           >
             <option value="Arial">Arial</option>
             <option value="Helvetica">Helvetica</option>
