@@ -10,9 +10,9 @@
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
   let fileInput: HTMLInputElement
-  let renderer: Renderer
-  let toolManager: ToolManager
-  let currentTool: ToolType = 'rect'
+  let renderer = $state<Renderer>()
+  let toolManager = $state<ToolManager>()
+  let currentTool = $state<ToolType>('rect')
   let isDragging = false
   let isResizing = false
   let isRotating = false
@@ -29,19 +29,19 @@
   let resizeStartBounds: { x: number; y: number; width: number; height: number } | null = null
 
   // Property editing state
-  let selectedStroke = '#333333'
-  let selectedStrokeWidth = 2
-  let selectedFill = '#ff6b6b'
-  let hasSelection = false
+  let selectedStroke = $state('#333333')
+  let selectedStrokeWidth = $state(2)
+  let selectedFill = $state('#ff6b6b')
+  let hasSelection = $state(false)
 
   // Text properties
-  let selectedFontFamily = 'Arial'
-  let selectedFontSize = 24
-  let selectedFontWeight = 'normal'
-  let selectedFontStyle = 'normal'
-  let selectedTextDecoration = 'none'
-  let selectedFontColor = '#000000'
-  let isTextBoxSelected = false
+  let selectedFontFamily = $state('Arial')
+  let selectedFontSize = $state(24)
+  let selectedFontWeight = $state('normal')
+  let selectedFontStyle = $state('normal')
+  let selectedTextDecoration = $state('none')
+  let selectedFontColor = $state('#000000')
+  let isTextBoxSelected = $state(false)
 
   // Clipboard for copy/paste
   let clipboardShape: Shape | null = null
@@ -52,8 +52,8 @@
   let textEditorDiv: HTMLDivElement | null = null
 
   // Path editing state
-  let isEditingPath = false
-  let editingPath: Path | null = null
+  let isEditingPath = $state(false)
+  let editingPath = $state<Path | null>(null)
 
   // File management state
   let currentFilePath: string | null = null
@@ -68,8 +68,8 @@
   }
 
   // Snap settings
-  let snapEnabled = true
-  let gridEnabled = true
+  let snapEnabled = $state(true)
+  let gridEnabled = $state(true)
 
   // Update snap settings reactively
   $effect(() => {
@@ -342,6 +342,7 @@
       toolManager.setTool(tool)
       renderer.selectShape(null)
       hasSelection = false
+      updateSelectionState()
     }
   }
 
@@ -405,6 +406,7 @@
           renderer.selectShape(clickedShape.props.id)
         }
         hasSelection = true
+        updateSelectionState()
       } else {
         // Clicking on empty area starts drag selection
         isSelectingArea = true
@@ -415,6 +417,7 @@
         if (!e.shiftKey) {
           renderer.selectShape(null)
           hasSelection = false
+          updateSelectionState()
         }
       }
     } else if (currentTool === 'path') {
@@ -611,6 +614,7 @@
         renderer.addShape(shape)
         renderer.selectShape(shape.props.id)
         hasSelection = true
+        updateSelectionState()
       }
       renderer.setPreview(null)
     }
@@ -626,6 +630,7 @@
         renderer.addShape(shape)
         renderer.selectShape(shape.props.id)
         hasSelection = true
+        updateSelectionState()
       }
       renderer.setPreview(null)
       return
@@ -666,6 +671,7 @@
     editorDiv.style.fontFamily = textBox.props.fontFamily || 'Arial'
     editorDiv.style.fontWeight = textBox.props.fontWeight || 'normal'
     editorDiv.style.fontStyle = textBox.props.fontStyle || 'normal'
+    editorDiv.style.textDecoration = textBox.props.textDecoration || 'none'
     editorDiv.style.lineHeight = `${textBox.props.lineHeight || 1.2}`
     editorDiv.style.padding = '5px'
     editorDiv.style.border = '2px solid #2196F3'
@@ -866,6 +872,8 @@
       renderer.removeShape(id) // This uses Command pattern for undo/redo
     }
     renderer.selectShape(null)
+    hasSelection = false
+    updateSelectionState()
   }
 
   function copyShape() {
@@ -925,6 +933,7 @@
     renderer.addShape(newShape)
     renderer.selectShape(newShape.props.id)
     hasSelection = true
+    updateSelectionState()
   }
 
   function bringToFront() {

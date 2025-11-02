@@ -332,6 +332,7 @@ export interface TextBoxProps extends ShapeProps {
   fontFamily?: string
   fontWeight?: 'normal' | 'bold'
   fontStyle?: 'normal' | 'italic'
+  textDecoration?: 'none' | 'underline'
   lineHeight?: number
 }
 
@@ -345,6 +346,7 @@ export class TextBox {
       fontFamily = 'Arial',
       fontWeight = 'normal',
       fontStyle = 'normal',
+      textDecoration = 'none',
       lineHeight = 1.2,
       rotation = 0
     } = this.props
@@ -398,7 +400,21 @@ export class TextBox {
     // Draw text lines
     const lineHeightPx = fontSize * lineHeight
     lines.forEach((line, i) => {
-      ctx.fillText(line, x + 5, y + 5 + i * lineHeightPx)
+      const textX = x + 5
+      const textY = y + 5 + i * lineHeightPx
+      ctx.fillText(line, textX, textY)
+
+      // Draw underline if textDecoration is 'underline'
+      if (textDecoration === 'underline' && line) {
+        const metrics = ctx.measureText(line)
+        const underlineY = textY + fontSize * 0.9 // Position underline below text baseline
+        ctx.strokeStyle = fontColor
+        ctx.lineWidth = Math.max(1, fontSize * 0.05) // Underline thickness proportional to font size
+        ctx.beginPath()
+        ctx.moveTo(textX, underlineY)
+        ctx.lineTo(textX + metrics.width, underlineY)
+        ctx.stroke()
+      }
     })
 
     ctx.restore()
@@ -416,6 +432,7 @@ export class TextBox {
       fontFamily = 'Arial',
       fontWeight = 'normal',
       fontStyle = 'normal',
+      textDecoration = 'none',
       lineHeight = 1.2,
       rotation = 0
     } = this.props
@@ -431,7 +448,7 @@ export class TextBox {
       .replace(/"/g, '&quot;')
 
     return `<foreignObject x="${x}" y="${y}" width="${width}" height="${height}" ${transformAttr}>
-  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: ${fontFamily}; font-size: ${fontSize}px; color: ${fontColor}; font-weight: ${fontWeight}; font-style: ${fontStyle}; line-height: ${lineHeight}; word-wrap: break-word; padding: 5px;">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: ${fontFamily}; font-size: ${fontSize}px; color: ${fontColor}; font-weight: ${fontWeight}; font-style: ${fontStyle}; text-decoration: ${textDecoration}; line-height: ${lineHeight}; word-wrap: break-word; padding: 5px;">
     ${escapedText}
   </div>
 </foreignObject>`

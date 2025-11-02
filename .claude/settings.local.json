@@ -29,7 +29,10 @@
       "Bash(npx asar:*)",
       "Bash(kill:*)",
       "Bash(npm run build:dir:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "mcp__serena__initial_instructions",
+      "mcp__serena__read_file",
+      "mcp__serena__replace_regex"
     ],
     "deny": [],
     "ask": []
