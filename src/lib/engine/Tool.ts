@@ -306,15 +306,15 @@ export class ToolManager {
           const cp2y = currentPoint.y - currentTangent.y * handleLength
           
           // For closed paths, the last segment goes back to first point
-          // Don't add a new point, just add to the path data
           if (close && currentIdx === 0) {
-            // This is handled by the Z command, but we need to store the control points
-            // Store them in the first point (M point) for editing purposes
+            // Store closing segment control points in the first point
+            // Keep type as 'M' but add control points for editing
             points[0].cp1x = cp1x
             points[0].cp1y = cp1y
             points[0].cp2x = cp2x
             points[0].cp2y = cp2y
-            points[0].type = 'C'
+            points[0].pointType = 'smooth'
+            // Don't change type - keep it as 'M'
           } else {
             points.push({
               x: currentPoint.x,
@@ -345,7 +345,7 @@ export class ToolManager {
       }
       
       // For closed paths, add closing segment and Z command
-      if (close && points[0].type === 'C' && points[0].cp1x !== undefined) {
+      if (close && points[0].cp1x !== undefined && points[0].cp2x !== undefined) {
         // Add the curve back to the start point
         d += ` C ${points[0].cp1x} ${points[0].cp1y} ${points[0].cp2x} ${points[0].cp2y} ${points[0].x} ${points[0].y}`
       }

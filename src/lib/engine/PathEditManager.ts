@@ -100,6 +100,7 @@ export class PathEditManager {
 
     this.handles = []
     const points = this.selectedPath.props.points
+    const isClosed = this.selectedPath.props.closed
 
     for (let i = 0; i < points.length; i++) {
       const point = points[i]
@@ -114,7 +115,7 @@ export class PathEditManager {
 
       // For Illustrator-style control points:
       // point[i] IN-handle = point[i].cp2
-      if (point.type === 'C' && point.cp2x !== undefined && point.cp2y !== undefined) {
+      if (point.cp2x !== undefined && point.cp2y !== undefined) {
         this.handles.push({
           pointIndex: i,
           type: 'cp2',
@@ -124,9 +125,10 @@ export class PathEditManager {
       }
 
       // point[i] OUT-handle = point[i+1].cp1
+      // For closed paths, the last point's OUT-handle is point[0].cp1
       if (i + 1 < points.length) {
         const nextPoint = points[i + 1]
-        if (nextPoint.type === 'C' && nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined) {
+        if (nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined) {
           this.handles.push({
             pointIndex: i,  // This OUT-handle belongs to point[i]
             type: 'cp1',
@@ -134,6 +136,14 @@ export class PathEditManager {
             y: nextPoint.cp1y,
           })
         }
+      } else if (isClosed && points[0].cp1x !== undefined && points[0].cp1y !== undefined) {
+        // Last point in closed path: OUT-handle is stored in point[0].cp1
+        this.handles.push({
+          pointIndex: i,
+          type: 'cp1',
+          x: points[0].cp1x,
+          y: points[0].cp1y,
+        })
       }
 
       // Quadratic bezier control point
@@ -207,10 +217,15 @@ export class PathEditManager {
         if (point.cp2y !== undefined) point.cp2y += dy
         
         // OUT-handle: point[i+1].cp1
+        const isClosed = this.selectedPath.props.closed
         if (handle.pointIndex + 1 < points.length) {
           const nextPoint = points[handle.pointIndex + 1]
           if (nextPoint.cp1x !== undefined) nextPoint.cp1x += dx
           if (nextPoint.cp1y !== undefined) nextPoint.cp1y += dy
+        } else if (isClosed && handle.pointIndex === points.length - 1) {
+          // For closed paths, last point's OUT-handle is in point[0].cp1
+          if (points[0].cp1x !== undefined) points[0].cp1x += dx
+          if (points[0].cp1y !== undefined) points[0].cp1y += dy
         }
         
         // Quadratic bezier
@@ -218,12 +233,22 @@ export class PathEditManager {
         if (point.cpy !== undefined) point.cpy += dy
         break
 
-      case 'cp1':
+      case 'cp1': {
         // cp1 is the OUT-handle of point[i], stored in point[i+1].cp1
+        // For closed paths and last point, stored in point[0].cp1
+        const isClosed = this.selectedPath.props.closed
+        const isLastPoint = handle.pointIndex === points.length - 1
+        
+        let targetPoint = null
         if (handle.pointIndex + 1 < points.length) {
-          const nextPoint = points[handle.pointIndex + 1]
-          if (nextPoint.cp1x !== undefined) nextPoint.cp1x += dx
-          if (nextPoint.cp1y !== undefined) nextPoint.cp1y += dy
+          targetPoint = points[handle.pointIndex + 1]
+        } else if (isClosed && isLastPoint) {
+          targetPoint = points[0]
+        }
+        
+        if (targetPoint && targetPoint.cp1x !== undefined && targetPoint.cp1y !== undefined) {
+          targetPoint.cp1x += dx
+          targetPoint.cp1y += dy
           
           // Adjust IN-handle (cp2) based on point type (unless Alt key is pressed)
           if (!altKey && point.cp2x !== undefined && point.cp2y !== undefined) {
@@ -231,8 +256,8 @@ export class PathEditManager {
             
             if (pointType === 'symmetrical') {
               // Symmetrical: mirror IN-handle with same length
-              const cp1VecX = nextPoint.cp1x - point.x
-              const cp1VecY = nextPoint.cp1y - point.y
+              const cp1VecX = targetPoint.cp1x - point.x
+              const cp1VecY = targetPoint.cp1y - point.y
               const length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
               
               if (length > 0) {
@@ -243,8 +268,8 @@ export class PathEditManager {
               }
             } else if (pointType === 'smooth') {
               // Smooth: mirror IN-handle direction but keep its length
-              const cp1VecX = nextPoint.cp1x - point.x
-              const cp1VecY = nextPoint.cp1y - point.y
+              const cp1VecX = targetPoint.cp1x - point.x
+              const cp1VecY = targetPoint.cp1y - point.y
               const cp1Length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
               const cp2Length = Math.sqrt(
                 (point.cp2x - point.x) ** 2 + (point.cp2y - point.y) ** 2
@@ -261,16 +286,26 @@ export class PathEditManager {
           }
         }
         break
+      }
 
-      case 'cp2':
+      case 'cp2': {
         // cp2 is the IN-handle of point[i]
         if (point.cp2x !== undefined) point.cp2x += dx
         if (point.cp2y !== undefined) point.cp2y += dy
         
         // Adjust OUT-handle (cp1) based on point type (unless Alt key is pressed)
-        if (!altKey && handle.pointIndex + 1 < points.length) {
-          const nextPoint = points[handle.pointIndex + 1]
-          if (nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined) {
+        if (!altKey) {
+          const isClosed = this.selectedPath.props.closed
+          const isLastPoint = handle.pointIndex === points.length - 1
+          
+          let targetPoint = null
+          if (handle.pointIndex + 1 < points.length) {
+            targetPoint = points[handle.pointIndex + 1]
+          } else if (isClosed && isLastPoint) {
+            targetPoint = points[0]
+          }
+          
+          if (targetPoint && targetPoint.cp1x !== undefined && targetPoint.cp1y !== undefined) {
             const pointType = point.pointType || 'smooth'
             
             if (pointType === 'symmetrical') {
@@ -282,8 +317,8 @@ export class PathEditManager {
               if (length > 0) {
                 const normX = cp2VecX / length
                 const normY = cp2VecY / length
-                nextPoint.cp1x = point.x - normX * length
-                nextPoint.cp1y = point.y - normY * length
+                targetPoint.cp1x = point.x - normX * length
+                targetPoint.cp1y = point.y - normY * length
               }
             } else if (pointType === 'smooth') {
               // Smooth: mirror OUT-handle direction but keep its length
@@ -291,20 +326,21 @@ export class PathEditManager {
               const cp2VecY = point.cp2y - point.y
               const cp2Length = Math.sqrt(cp2VecX * cp2VecX + cp2VecY * cp2VecY)
               const cp1Length = Math.sqrt(
-                (nextPoint.cp1x - point.x) ** 2 + (nextPoint.cp1y - point.y) ** 2
+                (targetPoint.cp1x - point.x) ** 2 + (targetPoint.cp1y - point.y) ** 2
               )
               
               if (cp2Length > 0) {
                 const normX = cp2VecX / cp2Length
                 const normY = cp2VecY / cp2Length
-                nextPoint.cp1x = point.x - normX * cp1Length
-                nextPoint.cp1y = point.y - normY * cp1Length
+                targetPoint.cp1x = point.x - normX * cp1Length
+                targetPoint.cp1y = point.y - normY * cp1Length
               }
             }
             // Corner: do nothing (cp1 stays independent)
           }
         }
         break
+      }
 
       case 'cp':
         if (point.cpx !== undefined) point.cpx += dx
@@ -533,10 +569,20 @@ export class PathEditManager {
     point.pointType = pointType
 
     // Get IN-handle and OUT-handle
+    const isClosed = this.selectedPath.props.closed
+    const isLastPoint = pointIndex === points.length - 1
+    
     const inHandle = point.cp2x !== undefined && point.cp2y !== undefined
-    const outHandle = pointIndex + 1 < points.length && 
-                      points[pointIndex + 1].cp1x !== undefined && 
-                      points[pointIndex + 1].cp1y !== undefined
+    
+    let outHandle = false
+    let nextPoint = null
+    if (pointIndex + 1 < points.length) {
+      nextPoint = points[pointIndex + 1]
+      outHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
+    } else if (isClosed && isLastPoint) {
+      nextPoint = points[0]
+      outHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
+    }
 
     if (!inHandle && !outHandle) return
 
@@ -546,8 +592,7 @@ export class PathEditManager {
       let cp1Length = 0
       let cp2Length = 0
       
-      if (outHandle) {
-        const nextPoint = points[pointIndex + 1]
+      if (outHandle && nextPoint) {
         cp1Length = Math.sqrt(
           (nextPoint.cp1x! - point.x) ** 2 + (nextPoint.cp1y! - point.y) ** 2
         )
@@ -562,8 +607,7 @@ export class PathEditManager {
       const avgLength = (cp1Length + cp2Length) / 2
 
       // Use OUT-handle direction as reference
-      if (outHandle) {
-        const nextPoint = points[pointIndex + 1]
+      if (outHandle && nextPoint) {
         const cp1VecX = nextPoint.cp1x! - point.x
         const cp1VecY = nextPoint.cp1y! - point.y
         const cp1Len = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
@@ -583,8 +627,7 @@ export class PathEditManager {
       }
     } else if (pointType === 'smooth') {
       // Smooth: align control points on a line but keep their individual lengths
-      if (outHandle && inHandle) {
-        const nextPoint = points[pointIndex + 1]
+      if (outHandle && inHandle && nextPoint) {
         const cp1VecX = nextPoint.cp1x! - point.x
         const cp1VecY = nextPoint.cp1y! - point.y
         const cp1Length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
@@ -615,9 +658,14 @@ export class PathEditManager {
     if (!this.selectedPath || !this.selectedPath.props.points) return null
     
     const point = this.selectedPath.props.points[pointIndex]
-    if (!point || point.type !== 'C') return null
+    if (!point) return null
     
-    return point.pointType || 'smooth'
+    // For bezier points (C) or closed path first point with control points
+    if (point.type === 'C' || (point.cp1x !== undefined && point.cp2x !== undefined)) {
+      return point.pointType || 'smooth'
+    }
+    
+    return null
   }
 
   /**
@@ -645,6 +693,11 @@ export class PathEditManager {
 
     // Add close path command if closed
     if (this.selectedPath.props.closed) {
+      // If the first point has control points, add closing bezier curve
+      const firstPoint = points[0]
+      if (firstPoint.cp1x !== undefined && firstPoint.cp2x !== undefined) {
+        d += `C ${firstPoint.cp1x} ${firstPoint.cp1y} ${firstPoint.cp2x} ${firstPoint.cp2y} ${firstPoint.x} ${firstPoint.y} `
+      }
       d += 'Z '
     }
 
@@ -678,24 +731,31 @@ export class PathEditManager {
       // - OUT-handle: point[i+1].cp1
 
       const isSelected = this.showAllControlPoints || this.selectedPointIndex === i
+      const isClosed = this.selectedPath.props.closed
 
-      if (point.type === 'C') {
-        // Draw IN-handle (cp2) when this point is selected
-        if (isSelected && point.cp2x !== undefined) {
-          ctx.beginPath()
-          ctx.moveTo(point.x, point.y)
-          ctx.lineTo(point.cp2x, point.cp2y!)
-          ctx.stroke()
-        }
+      // Draw IN-handle (cp2) when this point is selected
+      if (isSelected && point.cp2x !== undefined && point.cp2y !== undefined) {
+        ctx.beginPath()
+        ctx.moveTo(point.x, point.y)
+        ctx.lineTo(point.cp2x, point.cp2y)
+        ctx.stroke()
       }
 
       // Draw OUT-handle from this point (stored in next point's cp1)
-      if (isSelected && i + 1 < points.length) {
-        const nextPoint = points[i + 1]
-        if (nextPoint.type === 'C' && nextPoint.cp1x !== undefined) {
+      if (isSelected) {
+        let nextPoint = null
+        
+        if (i + 1 < points.length) {
+          nextPoint = points[i + 1]
+        } else if (isClosed && i === points.length - 1) {
+          // For closed paths, last point's OUT-handle is in point[0].cp1
+          nextPoint = points[0]
+        }
+        
+        if (nextPoint && nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined) {
           ctx.beginPath()
           ctx.moveTo(point.x, point.y)
-          ctx.lineTo(nextPoint.cp1x, nextPoint.cp1y!)
+          ctx.lineTo(nextPoint.cp1x, nextPoint.cp1y)
           ctx.stroke()
         }
       }

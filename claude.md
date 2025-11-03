@@ -1,5 +1,102 @@
 # Grapher - 開発ログ
 
+## 2025-11-03 - 閉じたPath表示問題の修正
+
+### 問題
+閉じたPathを選択すると、表示が消える問題がありました。
+
+### 原因
+
+Tool.tsで閉じたPathを生成する際、最初のポイント（point[0]）のtypeを'M'から'C'に変更していました（317行）：
+```typescript
+points[0].type = 'C'  // ❌ 間違い
+```
+
+これにより、以下の問題が発生：
+1. pathデータ生成時に不正なSVG pathが生成される
+2. PathEditManagerが閉じたパスの制御点を正しく処理できない
+
+さらに、PathEditManagerの各メソッドが閉じたパスを考慮していませんでした：
+- 最後のポイントのOUT-handleは `point[0].cp1` に保存されているが、処理されていない
+- 最初のポイント（type='M'）が制御点を持つ場合の処理がない
+
+### 修正内容
+
+#### 1. Tool.ts - 最初のポイントのtypeを'M'のまま保持
+
+```typescript
+// 修正前
+points[0].type = 'C'  // ❌
+
+// 修正後  
+// Don't change type - keep it as 'M'
+points[0].cp1x = cp1x
+points[0].cp1y = cp1y
+points[0].cp2x = cp2x
+points[0].cp2y = cp2y
+points[0].pointType = 'smooth'
+// type は 'M' のまま ✅
+```
+
+#### 2. PathEditManager.ts - 複数のメソッドを修正
+
+**updateHandles():**
+- 閉じたパスの最後のポイントのOUT-handleを追加（`point[0].cp1`）
+- すべてのポイントでcp2がある場合にIN-handleを追加（type='C'の条件を削除）
+
+**render():**
+- IN-handleの描画条件を `point.type === 'C'` から `point.cp2x !== undefined` に変更
+- 閉じたパスの最後のポイントのOUT-handleを描画
+
+**moveHandle():**
+- case 'point': 最後のポイントを移動する際、`point[0].cp1` も移動
+- case 'cp1': 閉じたパスの最後のポイントのOUT-handleに対応
+- case 'cp2': 閉じたパスの最後のポイントのOUT-handleと連動
+
+**updatePathData():**
+- 閉じたパスの場合、最後のCコマンド（閉じるセグメント）を追加してからZコマンドを追加
+
+**getPointType():**
+- type='M'でも制御点がある場合（閉じたパス）はpointTypeを返す
+
+**setPointType():**
+- 閉じたパスの最後のポイントのOUT-handle（`point[0].cp1`）を処理
+
+### 結果
+
+✅ 閉じたPathを選択しても表示が消えない
+✅ 閉じたPathの編集が正常に動作
+✅ 最後のポイントのOUT-handleが表示・編集可能
+✅ 最初のポイントのIN-handle/OUT-handleが表示・編集可能
+✅ smooth/symmetricalモードが閉じたPathでも正常動作
+
+### 使い方
+
+1. Pathツールで閉じた図形を作成（最初のポイント近くをクリック）
+2. Selectツールで選択
+3. ダブルクリックで編集モード
+4. すべてのアンカーポイントと制御点が正しく表示される
+5. 制御点をドラッグして形状を調整可能
+
+### 技術詳細
+
+**閉じたPathのデータ構造:**
+- `point[0]`: type='M', 制御点 cp1/cp2 を持つ（最後→最初のセグメント用）
+- `point[1..n-1]`: type='C', 各セグメントの制御点
+- `props.closed`: true
+- pathデータ: `M x0 y0 C ... C cpnx cpny cp0x cp0y x0 y0 Z`
+
+**制御点の対応:**
+- point[i]のIN-handle = point[i].cp2
+- point[i]のOUT-handle = point[i+1].cp1（最後は point[0].cp1）
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/engine/Tool.ts` - 最初のポイントのtype保持、pathデータ生成
+- `/Users/oda/project/claude/grapher/src/lib/engine/PathEditManager.ts` - updateHandles(), render(), moveHandle(), updatePathData(), getPointType(), setPointType()の修正
+
+---
+
 ## 2025-11-03 - Pathの閉じた図形（Closed Path）サポート
 
 ### 実装内容
