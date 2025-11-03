@@ -142,6 +142,8 @@ export class TransformControls {
       this.resizeCircle(handleType, dx, dy)
     } else if (this.shape instanceof Line) {
       this.resizeLine(handleType, dx, dy)
+    } else if (this.shape instanceof Path) {
+      this.resizePath(handleType, dx, dy)
     } else if (this.shape instanceof TextBox) {
       this.resizeTextBox(handleType, dx, dy)
     } else if (this.shape instanceof Group) {
@@ -273,6 +275,157 @@ export class TransformControls {
     }
     if (textBox.props.height < 30) {
       textBox.props.height = 30
+    }
+  }
+
+  private resizePath(handleType: HandleType, dx: number, dy: number) {
+    const path = this.shape as Path
+    const bounds = path.getBounds()
+    const { x: oldX, y: oldY, width: oldWidth, height: oldHeight } = bounds
+
+    // Calculate new bounds based on handle type
+    let newX = oldX
+    let newY = oldY
+    let newWidth = oldWidth
+    let newHeight = oldHeight
+
+    switch (handleType) {
+      case 'nw':
+        newX = oldX + dx
+        newY = oldY + dy
+        newWidth = oldWidth - dx
+        newHeight = oldHeight - dy
+        break
+      case 'n':
+        newY = oldY + dy
+        newHeight = oldHeight - dy
+        break
+      case 'ne':
+        newY = oldY + dy
+        newWidth = oldWidth + dx
+        newHeight = oldHeight - dy
+        break
+      case 'e':
+        newWidth = oldWidth + dx
+        break
+      case 'se':
+        newWidth = oldWidth + dx
+        newHeight = oldHeight + dy
+        break
+      case 's':
+        newHeight = oldHeight + dy
+        break
+      case 'sw':
+        newX = oldX + dx
+        newWidth = oldWidth - dx
+        newHeight = oldHeight + dy
+        break
+      case 'w':
+        newX = oldX + dx
+        newWidth = oldWidth - dx
+        break
+    }
+
+    // Prevent negative or too small dimensions
+    if (newWidth < 20) {
+      newWidth = 20
+      newX = oldX
+    }
+    if (newHeight < 20) {
+      newHeight = 20
+      newY = oldY
+    }
+
+    // Calculate scale factors
+    const scaleX = newWidth / oldWidth
+    const scaleY = newHeight / oldHeight
+
+    // Determine origin point (the fixed point during resize)
+    let originX = oldX
+    let originY = oldY
+
+    switch (handleType) {
+      case 'nw':
+        originX = oldX + oldWidth
+        originY = oldY + oldHeight
+        break
+      case 'n':
+        originX = oldX + oldWidth / 2
+        originY = oldY + oldHeight
+        break
+      case 'ne':
+        originX = oldX
+        originY = oldY + oldHeight
+        break
+      case 'e':
+        originX = oldX
+        originY = oldY + oldHeight / 2
+        break
+      case 'se':
+        originX = oldX
+        originY = oldY
+        break
+      case 's':
+        originX = oldX + oldWidth / 2
+        originY = oldY
+        break
+      case 'sw':
+        originX = oldX + oldWidth
+        originY = oldY
+        break
+      case 'w':
+        originX = oldX + oldWidth
+        originY = oldY + oldHeight / 2
+        break
+    }
+
+    // Scale all path points
+    if (path.props.points) {
+      for (const point of path.props.points) {
+        const relX = point.x - originX
+        const relY = point.y - originY
+        point.x = originX + relX * scaleX
+        point.y = originY + relY * scaleY
+
+        // Scale control points if present
+        if (point.cp1x !== undefined && point.cp1y !== undefined) {
+          const relCp1X = point.cp1x - originX
+          const relCp1Y = point.cp1y - originY
+          point.cp1x = originX + relCp1X * scaleX
+          point.cp1y = originY + relCp1Y * scaleY
+        }
+        if (point.cp2x !== undefined && point.cp2y !== undefined) {
+          const relCp2X = point.cp2x - originX
+          const relCp2Y = point.cp2y - originY
+          point.cp2x = originX + relCp2X * scaleX
+          point.cp2y = originY + relCp2Y * scaleY
+        }
+        if (point.cpx !== undefined && point.cpy !== undefined) {
+          const relCpX = point.cpx - originX
+          const relCpY = point.cpy - originY
+          point.cpx = originX + relCpX * scaleX
+          point.cpy = originY + relCpY * scaleY
+        }
+      }
+
+      // Regenerate path data string from updated points
+      let d = ''
+      for (let i = 0; i < path.props.points.length; i++) {
+        const point = path.props.points[i]
+        if (point.type === 'M') {
+          d += `M ${point.x} ${point.y} `
+        } else if (point.type === 'L') {
+          d += `L ${point.x} ${point.y} `
+        } else if (point.type === 'C' && point.cp1x !== undefined && point.cp2x !== undefined) {
+          d += `C ${point.cp1x} ${point.cp1y} ${point.cp2x} ${point.cp2y} ${point.x} ${point.y} `
+        } else if (point.type === 'Q' && point.cpx !== undefined) {
+          d += `Q ${point.cpx} ${point.cpy} ${point.x} ${point.y} `
+        }
+      }
+      if (path.props.closed) {
+        d += 'Z'
+      }
+      path.props.d = d.trim()
     }
   }
 

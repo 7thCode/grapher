@@ -219,11 +219,17 @@ export interface PathPoint {
   // For quadratic bezier (Q): control point
   cpx?: number
   cpy?: number
+  // Point type for Illustrator-style editing
+  // - smooth: control points are collinear, but lengths are independent
+  // - symmetrical: control points are collinear and have equal lengths
+  // - corner: control points are independent
+  pointType?: 'smooth' | 'symmetrical' | 'corner'
 }
 
 export interface PathProps extends ShapeProps {
   d: string // SVG path data
   points?: PathPoint[]
+  closed?: boolean // Whether the path is closed
 }
 
 export class Path {

@@ -210,13 +210,155 @@ export class ToolManager {
     }
   }
 
-  finishPath(): Shape | null {
+  finishPath(close = false): Shape | null {
     if (this.currentTool !== 'path' || !this.state.preview) return null
 
-    const shape = this.state.preview
+    const path = this.state.preview as Path
+    const pathPoints = this.state.pathPoints || []
+
+    // Convert pathPoints to PathPoint array for editing
+    if (pathPoints.length >= 2) {
+      const points: import('./Shape').PathPoint[] = []
+
+      // First point is always 'M' (moveto)
+      points.push({
+        x: pathPoints[0].x,
+        y: pathPoints[0].y,
+        type: 'M'
+      })
+
+      // If only 2 points, use a line
+      if (pathPoints.length === 2) {
+        points.push({
+          x: pathPoints[1].x,
+          y: pathPoints[1].y,
+          type: 'L'
+        })
+      } else {
+        // For 3+ points, create smooth cubic bezier curves
+        // Calculate tangents at each point first
+        const tangents: { x: number; y: number }[] = []
+        
+        // For closed paths, extend the points array cyclically for tangent calculation
+        const extendedPoints = close 
+          ? [pathPoints[pathPoints.length - 1], ...pathPoints, pathPoints[0]]
+          : pathPoints
+        
+        for (let i = 0; i < pathPoints.length; i++) {
+          let tangentX: number
+          let tangentY: number
+          
+          if (close) {
+            // Closed path: always use average tangent
+            const idx = i + 1 // offset for extended array
+            tangentX = extendedPoints[idx + 1].x - extendedPoints[idx - 1].x
+            tangentY = extendedPoints[idx + 1].y - extendedPoints[idx - 1].y
+          } else {
+            // Open path
+            if (i === 0) {
+              // First point: tangent toward next point
+              tangentX = pathPoints[1].x - pathPoints[0].x
+              tangentY = pathPoints[1].y - pathPoints[0].y
+            } else if (i === pathPoints.length - 1) {
+              // Last point: tangent from previous point
+              tangentX = pathPoints[i].x - pathPoints[i - 1].x
+              tangentY = pathPoints[i].y - pathPoints[i - 1].y
+            } else {
+              // Middle points: average tangent
+              tangentX = pathPoints[i + 1].x - pathPoints[i - 1].x
+              tangentY = pathPoints[i + 1].y - pathPoints[i - 1].y
+            }
+          }
+          
+          // Normalize
+          const length = Math.sqrt(tangentX * tangentX + tangentY * tangentY)
+          if (length > 0) {
+            tangentX /= length
+            tangentY /= length
+          }
+          
+          tangents.push({ x: tangentX, y: tangentY })
+        }
+        
+        // Create bezier segments
+        const segmentCount = close ? pathPoints.length : pathPoints.length - 1
+        for (let i = 0; i < segmentCount; i++) {
+          const prevIdx = i
+          const currentIdx = (i + 1) % pathPoints.length
+          
+          const prevPoint = pathPoints[prevIdx]
+          const currentPoint = pathPoints[currentIdx]
+          const prevTangent = tangents[prevIdx]
+          const currentTangent = tangents[currentIdx]
+          
+          // Distance between points
+          const dist = Math.sqrt(
+            (currentPoint.x - prevPoint.x) ** 2 + (currentPoint.y - prevPoint.y) ** 2
+          )
+          const handleLength = dist / 3
+          
+          // OUT-handle from prevPoint (stored as cp1)
+          const cp1x = prevPoint.x + prevTangent.x * handleLength
+          const cp1y = prevPoint.y + prevTangent.y * handleLength
+          
+          // IN-handle to currentPoint (stored as cp2)
+          const cp2x = currentPoint.x - currentTangent.x * handleLength
+          const cp2y = currentPoint.y - currentTangent.y * handleLength
+          
+          // For closed paths, the last segment goes back to first point
+          // Don't add a new point, just add to the path data
+          if (close && currentIdx === 0) {
+            // This is handled by the Z command, but we need to store the control points
+            // Store them in the first point (M point) for editing purposes
+            points[0].cp1x = cp1x
+            points[0].cp1y = cp1y
+            points[0].cp2x = cp2x
+            points[0].cp2y = cp2y
+            points[0].type = 'C'
+          } else {
+            points.push({
+              x: currentPoint.x,
+              y: currentPoint.y,
+              type: 'C',
+              cp1x,
+              cp1y,
+              cp2x,
+              cp2y,
+              pointType: 'smooth'
+            })
+          }
+        }
+      }
+
+      path.props.points = points
+      path.props.closed = close
+
+      // Generate d attribute from points
+      let d = `M ${points[0].x} ${points[0].y}`
+      for (let i = 1; i < points.length; i++) {
+        const point = points[i]
+        if (point.type === 'L') {
+          d += ` L ${point.x} ${point.y}`
+        } else if (point.type === 'C' && point.cp1x !== undefined && point.cp2x !== undefined) {
+          d += ` C ${point.cp1x} ${point.cp1y} ${point.cp2x} ${point.cp2y} ${point.x} ${point.y}`
+        }
+      }
+      
+      // For closed paths, add closing segment and Z command
+      if (close && points[0].type === 'C' && points[0].cp1x !== undefined) {
+        // Add the curve back to the start point
+        d += ` C ${points[0].cp1x} ${points[0].cp1y} ${points[0].cp2x} ${points[0].cp2y} ${points[0].x} ${points[0].y}`
+      }
+      if (close) {
+        d += ' Z'
+      }
+      
+      path.props.d = d
+    }
+
     this.state = { isDrawing: false, startX: 0, startY: 0, pathPoints: [] }
 
-    return shape
+    return path
   }
 
   cancelDrawing() {

@@ -54,6 +54,9 @@
   // Path editing state
   let isEditingPath = $state(false)
   let editingPath = $state<Path | null>(null)
+  let selectedPathPointIndex = $state<number | null>(null)
+  let pathSmoothMode = $state(true) // Smooth control point adjustment
+  let pathShowAllControlPoints = $state(true) // Show all control points or only selected
 
   // File management state
   let currentFilePath: string | null = null
@@ -358,6 +361,7 @@
     if (isEditingPath) {
       const pathEditManager = renderer.getPathEditManager()
       const pathHandle = pathEditManager.getHandleAt(x, y)
+      console.log('Path editing mode - clicked at:', x, y, 'handle:', pathHandle)
 
       if (pathHandle) {
         // Start dragging a path handle
@@ -365,9 +369,26 @@
         dragStart = { x, y }
         // Store handle reference for later use
         ;(window as any)._draggedPathHandle = pathHandle
+
+        // Update selected point index for reactivity
+        if (pathHandle.type === 'point') {
+          selectedPathPointIndex = pathHandle.pointIndex
+        } else if (pathHandle.type === 'cp1' || pathHandle.type === 'cp2' || pathHandle.type === 'cp') {
+          // Both cp1 and cp2 belong to this point, so select the point itself
+          selectedPathPointIndex = pathHandle.pointIndex
+        }
+
+        // Update PathEditManager's selected point
+        const pathEditManager = renderer.getPathEditManager()
+        pathEditManager.selectPoint(selectedPathPointIndex)
+
+        // Render to update control point visibility
+        renderer.render()
+        
         return
       } else {
         // Click outside - stop editing
+        console.log('Clicked outside handles - stopping path editing')
         stopPathEditing()
         return
       }
@@ -423,8 +444,31 @@
       }
     } else if (currentTool === 'path') {
       // Path tool: add point on click
-      toolManager.addPathPoint(x, y)
+      // Check if clicking near the first point to close the path
       const state = toolManager.getState()
+      const pathPoints = state.pathPoints || []
+
+      if (pathPoints.length >= 3) {
+        const firstPoint = pathPoints[0]
+        const distance = Math.sqrt(
+          (x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2
+        )
+
+        // If clicking within 10px of first point, close the path
+        if (distance < 10) {
+          const shape = toolManager.finishPath(true) // close=true
+          if (shape) {
+            renderer.addShape(shape)
+            renderer.selectShape(shape.props.id)
+            hasSelection = true
+            updateSelectionState()
+          }
+          renderer.setPreview(null)
+          return
+        }
+      }
+
+      toolManager.addPathPoint(x, y)
       renderer.setPreview(state.preview ?? null)
     } else if (currentTool === 'text') {
       // Text tool: start drawing text box
@@ -448,8 +492,11 @@
       if (pathHandle) {
         const dx = x - dragStart.x
         const dy = y - dragStart.y
-        renderer.getPathEditManager().moveHandle(pathHandle, dx, dy)
+        console.log('Moving handle:', pathHandle.type, 'dx:', dx, 'dy:', dy)
+        // Pass Alt key state to enable independent control point movement
+        renderer.getPathEditManager().moveHandle(pathHandle, dx, dy, e.altKey)
         dragStart = { x, y }
+        renderer.render()
       }
       return
     }
@@ -626,7 +673,7 @@
 
     // Double click to finish path
     if (currentTool === 'path') {
-      const shape = toolManager.finishPath()
+      const shape = toolManager.finishPath(false) // close=false (open path)
       if (shape) {
         renderer.addShape(shape)
         renderer.selectShape(shape.props.id)
@@ -735,9 +782,18 @@
   function startPathEditing(path: Path) {
     if (!renderer) return
 
+    console.log('Starting path editing, path points:', path.props.points)
     isEditingPath = true
     editingPath = path
+    selectedPathPointIndex = null // Reset selection
     renderer.startPathEditing(path)
+
+    // Configure path edit manager
+    const pathEditManager = renderer.getPathEditManager()
+    pathEditManager.setSnapManager(renderer.getSnapManager())
+    pathEditManager.setSmoothMode(pathSmoothMode)
+    pathEditManager.setShowAllControlPoints(pathShowAllControlPoints)
+    console.log('Path editing mode activated')
   }
 
   function stopPathEditing() {
@@ -745,6 +801,7 @@
 
     isEditingPath = false
     editingPath = null
+    selectedPathPointIndex = null // Clear selection
     renderer.stopPathEditing()
   }
 
@@ -858,6 +915,73 @@
         e.preventDefault()
         const lastIdx = editingPath.props.points.length - 1
         pathEditManager.convertToLine(lastIdx)
+        return
+      }
+
+      // Q: Convert to quadratic bezier
+      if (e.key === 'q' && editingPath && editingPath.props.points) {
+        e.preventDefault()
+        const lastIdx = editingPath.props.points.length - 1
+        pathEditManager.convertToQuadraticBezier(lastIdx)
+        return
+      }
+
+      // Z: Close/open path
+      if (e.key === 'z' && editingPath) {
+        e.preventDefault()
+        if (pathEditManager.isPathClosed()) {
+          pathEditManager.openPath()
+        } else {
+          pathEditManager.closePath()
+        }
+        renderer.render()
+        return
+      }
+
+      // S: Toggle smooth mode
+      if (e.key === 's' && editingPath) {
+        e.preventDefault()
+        pathSmoothMode = !pathSmoothMode
+        pathEditManager.setSmoothMode(pathSmoothMode)
+        return
+      }
+
+      // H: Toggle show all control points
+      if (e.key === 'h' && editingPath) {
+        e.preventDefault()
+        pathShowAllControlPoints = !pathShowAllControlPoints
+        pathEditManager.setShowAllControlPoints(pathShowAllControlPoints)
+        renderer.render()
+        return
+      }
+
+      // 1: Set point type to smooth
+      if (e.key === '1' && editingPath) {
+        e.preventDefault()
+        if (selectedPathPointIndex !== null) {
+          pathEditManager.setPointType(selectedPathPointIndex, 'smooth')
+          renderer.render()
+        }
+        return
+      }
+
+      // 2: Set point type to symmetrical
+      if (e.key === '2' && editingPath) {
+        e.preventDefault()
+        if (selectedPathPointIndex !== null) {
+          pathEditManager.setPointType(selectedPathPointIndex, 'symmetrical')
+          renderer.render()
+        }
+        return
+      }
+
+      // 3: Set point type to corner
+      if (e.key === '3' && editingPath) {
+        e.preventDefault()
+        if (selectedPathPointIndex !== null) {
+          pathEditManager.setPointType(selectedPathPointIndex, 'corner')
+          renderer.render()
+        }
         return
       }
     }
@@ -1513,6 +1637,141 @@
         </button>
         <button
           class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            const editingPath = pathEditManager.getEditingPath()
+            if (editingPath && editingPath.props.points) {
+              const lastIdx = editingPath.props.points.length - 1
+              pathEditManager.convertToQuadraticBezier(lastIdx)
+            }
+          }}
+          title="2次ベジェ曲線に変換 (Q)"
+        >
+          〰️
+        </button>
+
+        <span class="separator">|</span>
+
+        <!-- Point Type Controls (Illustrator style) -->
+        {#if renderer && selectedPathPointIndex !== null}
+          {@const pathEditManager = renderer.getPathEditManager()}
+          {@const editingPath = pathEditManager.getEditingPath()}
+          {@const selectedPoint = editingPath?.props.points?.[selectedPathPointIndex]}
+          {@const isBezierPoint = selectedPoint?.type === 'C'}
+          
+          <!-- Show point type indicator -->
+          <span class="point-type-indicator" title="選択中のポイントタイプ">
+            {#if selectedPoint}
+              {@const pointTypeName = selectedPoint.type === 'M' ? '始点' :
+                                      selectedPoint.type === 'L' ? '直線' :
+                                      selectedPoint.type === 'C' ? 'ベジェ' : '2次ベジェ'}
+              {@const pointAttr = isBezierPoint ? pathEditManager.getPointType(selectedPathPointIndex) : null}
+              {@const attrName = pointAttr === 'smooth' ? 'スムーズ' :
+                                 pointAttr === 'symmetrical' ? '対称' :
+                                 pointAttr === 'corner' ? 'コーナー' : ''}
+              {pointTypeName}{attrName ? ` (${attrName})` : ''}
+            {/if}
+          </span>
+
+          <!-- Point type buttons (only for cubic bezier points) -->
+          <button
+            class="tool-button"
+            class:active={isBezierPoint && pathEditManager.getPointType(selectedPathPointIndex) === 'smooth'}
+            disabled={!isBezierPoint}
+            onclick={() => {
+              if (isBezierPoint) {
+                pathEditManager.setPointType(selectedPathPointIndex!, 'smooth')
+                renderer.render()
+              }
+            }}
+            title={isBezierPoint ? "スムーズポイント (1)" : "ベジェ曲線ポイントのみ"}
+          >
+            〜
+          </button>
+          <button
+            class="tool-button"
+            class:active={isBezierPoint && pathEditManager.getPointType(selectedPathPointIndex) === 'symmetrical'}
+            disabled={!isBezierPoint}
+            onclick={() => {
+              if (isBezierPoint) {
+                pathEditManager.setPointType(selectedPathPointIndex!, 'symmetrical')
+                renderer.render()
+              }
+            }}
+            title={isBezierPoint ? "対称ポイント (2)" : "ベジェ曲線ポイントのみ"}
+          >
+            ⚖️
+          </button>
+          <button
+            class="tool-button"
+            class:active={isBezierPoint && pathEditManager.getPointType(selectedPathPointIndex) === 'corner'}
+            disabled={!isBezierPoint}
+            onclick={() => {
+              if (isBezierPoint) {
+                pathEditManager.setPointType(selectedPathPointIndex!, 'corner')
+                renderer.render()
+              }
+            }}
+            title={isBezierPoint ? "コーナーポイント (3)" : "ベジェ曲線ポイントのみ"}
+          >
+            ⌐
+          </button>
+        {/if}
+
+        <span class="separator">|</span>
+        
+        <button
+          class="tool-button"
+          onclick={() => {
+            const pathEditManager = renderer.getPathEditManager()
+            if (pathEditManager.isPathClosed()) {
+              pathEditManager.openPath()
+              renderer.render()
+            } else {
+              pathEditManager.closePath()
+              renderer.render()
+            }
+          }}
+          title="パスを閉じる/開く (Z)"
+        >
+          {#if renderer && renderer.getPathEditManager().isPathClosed()}
+            🔓
+          {:else}
+            🔒
+          {/if}
+        </button>
+        
+        <span class="separator">|</span>
+        
+        <label class="toolbar-label">
+          <input
+            type="checkbox"
+            bind:checked={pathSmoothMode}
+            onchange={() => {
+              const pathEditManager = renderer.getPathEditManager()
+              pathEditManager.setSmoothMode(pathSmoothMode)
+            }}
+          />
+          <span>スムーズ</span>
+        </label>
+        
+        <label class="toolbar-label">
+          <input
+            type="checkbox"
+            bind:checked={pathShowAllControlPoints}
+            onchange={() => {
+              const pathEditManager = renderer.getPathEditManager()
+              pathEditManager.setShowAllControlPoints(pathShowAllControlPoints)
+              renderer.render()
+            }}
+          />
+          <span>全制御点</span>
+        </label>
+        
+        <span class="separator">|</span>
+        
+        <button
+          class="tool-button"
           onclick={stopPathEditing}
           title="編集終了 (ESC)"
         >
@@ -1813,6 +2072,33 @@
   .tool-button:hover {
     background: #4c4c4c;
     border-color: #666;
+  }
+
+  .tool-button.active {
+    background: #2196F3;
+    border-color: #1976D2;
+    color: #fff;
+  }
+
+  .tool-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: #2c2c2c;
+  }
+
+  .tool-button:disabled:hover {
+    background: #2c2c2c;
+    border-color: #555;
+  }
+
+  .point-type-indicator {
+    font-size: 12px;
+    color: #aaa;
+    padding: 4px 8px;
+    background: #2c2c2c;
+    border-radius: 3px;
+    border: 1px solid #444;
+    margin-right: 8px;
   }
 
   .snap-settings {

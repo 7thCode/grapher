@@ -92,7 +92,41 @@ export class Renderer {
     } else if (shape instanceof Path) {
       shape.props.x += dx
       shape.props.y += dy
-      // TODO: update path data
+
+      // Update all points
+      if (shape.props.points) {
+        for (const point of shape.props.points) {
+          point.x += dx
+          point.y += dy
+
+          // Update control points for bezier curves
+          if (point.cp1x !== undefined) point.cp1x += dx
+          if (point.cp1y !== undefined) point.cp1y += dy
+          if (point.cp2x !== undefined) point.cp2x += dx
+          if (point.cp2y !== undefined) point.cp2y += dy
+          if (point.cpx !== undefined) point.cpx += dx
+          if (point.cpy !== undefined) point.cpy += dy
+        }
+
+        // Regenerate path data from points
+        let d = ''
+        for (let i = 0; i < shape.props.points.length; i++) {
+          const point = shape.props.points[i]
+          if (point.type === 'M') {
+            d += `M ${point.x} ${point.y} `
+          } else if (point.type === 'L') {
+            d += `L ${point.x} ${point.y} `
+          } else if (point.type === 'C' && point.cp1x !== undefined && point.cp2x !== undefined) {
+            d += `C ${point.cp1x} ${point.cp1y} ${point.cp2x} ${point.cp2y} ${point.x} ${point.y} `
+          } else if (point.type === 'Q' && point.cpx !== undefined) {
+            d += `Q ${point.cpx} ${point.cpy} ${point.x} ${point.y} `
+          }
+        }
+        if (shape.props.closed) {
+          d += 'Z'
+        }
+        shape.props.d = d.trim()
+      }
     } else if (shape instanceof TextBox) {
       shape.props.x += dx
       shape.props.y += dy
