@@ -1657,7 +1657,8 @@
           {@const pathEditManager = renderer.getPathEditManager()}
           {@const editingPath = pathEditManager.getEditingPath()}
           {@const selectedPoint = editingPath?.props.points?.[selectedPathPointIndex]}
-          {@const isBezierPoint = selectedPoint?.type === 'C'}
+          {@const isBezierPoint = selectedPoint?.type === 'C' ||
+                                  (selectedPoint?.cp1x !== undefined && selectedPoint?.cp2x !== undefined)}
           
           <!-- Show point type indicator -->
           <span class="point-type-indicator" title="選択中のポイントタイプ">

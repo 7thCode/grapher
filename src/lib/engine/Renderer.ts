@@ -122,6 +122,12 @@ export class Renderer {
             d += `Q ${point.cpx} ${point.cpy} ${point.x} ${point.y} `
           }
         }
+        // For closed paths, add closing segment and Z command
+        if (shape.props.closed && shape.props.points[0].cp1x !== undefined && shape.props.points[0].cp2x !== undefined) {
+          // Add the curve back to the start point
+          const firstPoint = shape.props.points[0]
+          d += `C ${firstPoint.cp1x} ${firstPoint.cp1y} ${firstPoint.cp2x} ${firstPoint.cp2y} ${firstPoint.x} ${firstPoint.y} `
+        }
         if (shape.props.closed) {
           d += 'Z'
         }
