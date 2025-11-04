@@ -1,5 +1,5 @@
 import type { Shape } from './Shape'
-import { Rect, Circle, Line, Path, TextBox, Group } from './Shape'
+import { Rect, Circle, Line, Path, TextBox, Group, gradientToSVG } from './Shape'
 import { TransformControls, type HandleType } from './TransformControls'
 import {
   CommandHistory,
@@ -352,10 +352,32 @@ export class Renderer {
   }
 
   exportSVG(): string {
+    // Collect gradient definitions
+    const gradientDefs: string[] = []
+    
+    for (const shape of this.shapes) {
+      const fill = shape.props.fill
+      if (fill && typeof fill === 'object' && 'type' in fill) {
+        // It's a gradient
+        const gradientId = `gradient-${shape.props.id}`
+        const gradientDef = `    ${gradientToSVG(fill, gradientId)}`
+        gradientDefs.push(gradientDef)
+      }
+    }
+    
+    // Generate shape SVGs
     const svgShapes = this.shapes.map((s) => s.toSVG()).join('\n  ')
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.canvas.width}" height="${this.canvas.height}">
-  ${svgShapes}
-</svg>`
+    
+    // Build final SVG
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${this.canvas.width}" height="${this.canvas.height}">\n`
+    
+    if (gradientDefs.length > 0) {
+      svg += `  <defs>\n${gradientDefs.join('\n')}\n  </defs>\n`
+    }
+    
+    svg += `  ${svgShapes}\n</svg>`
+    
+    return svg
   }
 
   getShapes() {

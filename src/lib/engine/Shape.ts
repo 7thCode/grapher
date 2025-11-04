@@ -1,9 +1,106 @@
+// Gradient definitions
+export interface GradientStop {
+  offset: number  // 0.0 - 1.0
+  color: string   // hex color
+}
+
+export interface LinearGradient {
+  type: 'linear'
+  stops: GradientStop[]
+  angle: number  // degrees (0 = top to bottom, 90 = left to right)
+}
+
+export type FillValue = string | LinearGradient
+
+// Helper functions for gradient handling
+export function isGradient(fill: FillValue | undefined): fill is LinearGradient {
+  return typeof fill === 'object' && fill !== null && 'type' in fill
+}
+
+export function createCanvasGradient(
+  ctx: CanvasRenderingContext2D,
+  gradient: LinearGradient,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): CanvasGradient {
+  // Calculate gradient vector based on angle
+  let x1 = x, y1 = y, x2 = x, y2 = y
+
+  switch (gradient.angle) {
+    case 0:   // top to bottom
+      x1 = x + width / 2
+      y1 = y
+      x2 = x + width / 2
+      y2 = y + height
+      break
+    case 90:  // left to right
+      x1 = x
+      y1 = y + height / 2
+      x2 = x + width
+      y2 = y + height / 2
+      break
+    case 180: // bottom to top
+      x1 = x + width / 2
+      y1 = y + height
+      x2 = x + width / 2
+      y2 = y
+      break
+    case 270: // right to left
+      x1 = x + width
+      y1 = y + height / 2
+      x2 = x
+      y2 = y + height / 2
+      break
+  }
+
+  const canvasGradient = ctx.createLinearGradient(x1, y1, x2, y2)
+  for (const stop of gradient.stops) {
+    canvasGradient.addColorStop(stop.offset, stop.color)
+  }
+
+  return canvasGradient
+}
+
+export function gradientToSVG(gradient: LinearGradient, id: string): string {
+  // Calculate x1, y1, x2, y2 as percentages
+  let x1 = '0%', y1 = '0%', x2 = '0%', y2 = '0%'
+
+  switch (gradient.angle) {
+    case 0:   // top to bottom
+      x1 = '50%'; y1 = '0%'
+      x2 = '50%'; y2 = '100%'
+      break
+    case 90:  // left to right
+      x1 = '0%'; y1 = '50%'
+      x2 = '100%'; y2 = '50%'
+      break
+    case 180: // bottom to top
+      x1 = '50%'; y1 = '100%'
+      x2 = '50%'; y2 = '0%'
+      break
+    case 270: // right to left
+      x1 = '100%'; y1 = '50%'
+      x2 = '0%'; y2 = '50%'
+      break
+  }
+
+  const stops = gradient.stops
+    .map(s => `<stop offset="${s.offset * 100}%" style="stop-color:${s.color}" />`)
+    .join('\n    ')
+
+  return `<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">
+    ${stops}
+  </linearGradient>`
+}
+
 // Base shape class
 export interface ShapeProps {
   id: string
   x: number
   y: number
-  fill?: string
+  fill?: FillValue
   stroke?: string
   strokeWidth?: number
   rotation?: number // Rotation angle in degrees
@@ -31,8 +128,15 @@ export class Rect {
       ctx.translate(-centerX, -centerY)
     }
 
-    ctx.fillStyle = fill
-    ctx.fillRect(x, y, width, height)
+    // Apply fill (gradient or solid color)
+    if (fill) {
+      if (isGradient(fill)) {
+        ctx.fillStyle = createCanvasGradient(ctx, fill, x, y, width, height)
+      } else {
+        ctx.fillStyle = fill
+      }
+      ctx.fillRect(x, y, width, height)
+    }
 
     if (stroke) {
       ctx.strokeStyle = stroke
@@ -52,7 +156,18 @@ export class Rect {
     const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
     const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${x + width/2} ${y + height/2})"` : ''
-    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}" ${strokeAttr} ${transformAttr} />`
+    
+    // Handle gradient or solid fill
+    let fillAttr = ''
+    if (fill) {
+      if (isGradient(fill)) {
+        fillAttr = `fill="url(#gradient-${this.props.id})"`
+      } else {
+        fillAttr = `fill="${fill}"`
+      }
+    }
+    
+    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" ${fillAttr} ${strokeAttr} ${transformAttr} />`
   }
 
   getBounds() {
@@ -87,7 +202,16 @@ export class Circle {
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
 
     if (fill) {
-      ctx.fillStyle = fill
+      if (isGradient(fill)) {
+        // For circles, use bounding box for gradient
+        const x = cx - r
+        const y = cy - r
+        const width = r * 2
+        const height = r * 2
+        ctx.fillStyle = createCanvasGradient(ctx, fill, x, y, width, height)
+      } else {
+        ctx.fillStyle = fill
+      }
       ctx.fill()
     }
 
@@ -111,7 +235,18 @@ export class Circle {
     const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
     const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${cx} ${cy})"` : ''
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" ${strokeAttr} ${transformAttr} />`
+    
+    // Handle gradient or solid fill
+    let fillAttr = ''
+    if (fill) {
+      if (isGradient(fill)) {
+        fillAttr = `fill="url(#gradient-${this.props.id})"`
+      } else {
+        fillAttr = `fill="${fill}"`
+      }
+    }
+    
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" ${fillAttr} ${strokeAttr} ${transformAttr} />`
   }
 
   getBounds() {
@@ -253,7 +388,12 @@ export class Path {
     const path = new Path2D(d)
 
     if (fill) {
-      ctx.fillStyle = fill
+      if (isGradient(fill)) {
+        const bounds = this.getBounds()
+        ctx.fillStyle = createCanvasGradient(ctx, fill, bounds.x, bounds.y, bounds.width, bounds.height)
+      } else {
+        ctx.fillStyle = fill
+      }
       ctx.fill(path)
     }
 
@@ -287,7 +427,17 @@ export class Path {
 
   toSVG(): string {
     const { d, fill, stroke = '#9C27B0', strokeWidth = 2, rotation = 0 } = this.props
-    const fillAttr = fill ? `fill="${fill}"` : 'fill="none"'
+    
+    // Handle gradient or solid fill
+    let fillAttr = 'fill="none"'
+    if (fill) {
+      if (isGradient(fill)) {
+        fillAttr = `fill="url(#gradient-${this.props.id})"`
+      } else {
+        fillAttr = `fill="${fill}"`
+      }
+    }
+    
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
     const bounds = this.getBounds()
     const centerX = bounds.x + bounds.width / 2

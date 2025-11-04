@@ -238,9 +238,12 @@ app.on('activate', () => {
 
 // Handle save-completed event from renderer
 ipcMain.on('save-completed', () => {
-  if (win) {
+  if (pendingClose && win) {
+    // Only close window if we were waiting for save before closing
     win.destroy()
   }
+  // Reset pending close flag
+  pendingClose = false
 })
 
 // IPC handler for loading SVG files

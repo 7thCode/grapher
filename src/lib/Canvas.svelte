@@ -4,8 +4,8 @@
   import { ToolManager, type ToolType } from './engine/Tool'
   import type { HandleType } from './engine/TransformControls'
   import { saveSVGFile } from './utils/electron'
-  import type { Shape } from './engine/Shape'
-  import { Rect, Circle, Line, Path, TextBox } from './engine/Shape'
+  import type { Shape, LinearGradient } from './engine/Shape'
+  import { Rect, Circle, Line, Path, TextBox, isGradient } from './engine/Shape'
 
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
@@ -32,6 +32,10 @@
   let selectedStroke = $state('#333333')
   let selectedStrokeWidth = $state(2)
   let selectedFill = $state('#ff6b6b')
+  let fillType = $state<'solid' | 'gradient'>('solid')
+  let gradientColor1 = $state('#ff6b6b')
+  let gradientColor2 = $state('#4ecdc4')
+  let gradientAngle = $state(0)  // 0=top-bottom, 90=left-right, 180=bottom-top, 270=right-left
   let hasSelection = $state(false)
 
   // Text properties
@@ -102,7 +106,22 @@
       if (selected) {
         selectedStroke = selected.props.stroke || '#333333'
         selectedStrokeWidth = selected.props.strokeWidth || 2
-        selectedFill = selected.props.fill || '#ff6b6b'
+
+        // Update fill properties (gradient or solid)
+        const fill = selected.props.fill
+        if (fill && isGradient(fill)) {
+          fillType = 'gradient'
+          gradientColor1 = fill.stops[0].color
+          gradientColor2 = fill.stops[1].color
+          gradientAngle = fill.angle
+          selectedFill = fill.stops[0].color  // For backward compatibility
+        } else {
+          fillType = 'solid'
+          selectedFill = (fill as string) || '#ff6b6b'
+          gradientColor1 = selectedFill
+          gradientColor2 = '#4ecdc4'
+          gradientAngle = 0
+        }
 
         // Update text properties if TextBox is selected
         if (selected instanceof TextBox) {
@@ -139,8 +158,61 @@
     if (!renderer) return
     const selected = renderer.getSelectedShape()
     if (selected) {
-      renderer.updateShapeProperties(selected.props.id, { fill: color })
       selectedFill = color
+      if (fillType === 'solid') {
+        renderer.updateShapeProperties(selected.props.id, { fill: color })
+      } else {
+        // Update gradient color1
+        gradientColor1 = color
+        applyGradient()
+      }
+    }
+  }
+
+  function updateFillType(type: 'solid' | 'gradient') {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      fillType = type
+      if (type === 'solid') {
+        renderer.updateShapeProperties(selected.props.id, { fill: selectedFill })
+      } else {
+        applyGradient()
+      }
+    }
+  }
+
+  function updateGradientColor1(color: string) {
+    if (!renderer) return
+    gradientColor1 = color
+    applyGradient()
+  }
+
+  function updateGradientColor2(color: string) {
+    if (!renderer) return
+    gradientColor2 = color
+    applyGradient()
+  }
+
+  function updateGradientAngle(angle: number) {
+    if (!renderer) return
+    gradientAngle = angle
+    applyGradient()
+  }
+
+  function applyGradient() {
+    if (!renderer) return
+    const selected = renderer.getSelectedShape()
+    if (selected) {
+      const gradient: LinearGradient = {
+        type: 'linear',
+        stops: [
+          { offset: 0, color: gradientColor1 },
+          { offset: 1, color: gradientColor2 }
+        ],
+        angle: gradientAngle
+      }
+      renderer.updateShapeProperties(selected.props.id, { fill: gradient })
     }
   }
 
@@ -1497,13 +1569,61 @@
 
       <label class="toolbar-label">
         <span>塗色</span>
-        <input
-          type="color"
-          value={selectedFill}
-          oninput={(e) => updateFill(e.currentTarget.value)}
+        <select
+          value={fillType}
+          oninput={(e) => updateFillType(e.currentTarget.value as 'solid' | 'gradient')}
           disabled={!hasSelection}
-        />
+        >
+          <option value="solid">単色</option>
+          <option value="gradient">グラデーション</option>
+        </select>
       </label>
+
+      {#if fillType === 'solid'}
+        <label class="toolbar-label">
+          <span>色</span>
+          <input
+            type="color"
+            value={selectedFill}
+            oninput={(e) => updateFill(e.currentTarget.value)}
+            disabled={!hasSelection}
+          />
+        </label>
+      {:else}
+        <label class="toolbar-label">
+          <span>開始色</span>
+          <input
+            type="color"
+            value={gradientColor1}
+            oninput={(e) => updateGradientColor1(e.currentTarget.value)}
+            disabled={!hasSelection}
+          />
+        </label>
+
+        <label class="toolbar-label">
+          <span>終了色</span>
+          <input
+            type="color"
+            value={gradientColor2}
+            oninput={(e) => updateGradientColor2(e.currentTarget.value)}
+            disabled={!hasSelection}
+          />
+        </label>
+
+        <label class="toolbar-label">
+          <span>方向</span>
+          <select
+            value={gradientAngle}
+            oninput={(e) => updateGradientAngle(Number(e.currentTarget.value))}
+            disabled={!hasSelection}
+          >
+            <option value="0">↓ 上→下</option>
+            <option value="90">→ 左→右</option>
+            <option value="180">↑ 下→上</option>
+            <option value="270">← 右→左</option>
+          </select>
+        </label>
+      {/if}
     </div>
 
     {#if isTextBoxSelected}
