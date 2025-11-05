@@ -47,8 +47,8 @@ export class ToolManager {
           y,
           width: 0,
           height: 0,
-          fill: this.getRandomColor(),
-          stroke: '#333',
+          fill: '#ffffff',
+          stroke: '#000000',
           strokeWidth: 2
         })
         break
@@ -61,8 +61,8 @@ export class ToolManager {
           cx: x,
           cy: y,
           r: 0,
-          fill: this.getRandomColor(),
-          stroke: '#333',
+          fill: '#ffffff',
+          stroke: '#000000',
           strokeWidth: 2
         })
         break
@@ -76,7 +76,7 @@ export class ToolManager {
           y1: y,
           x2: x,
           y2: y,
-          stroke: this.getRandomColor(),
+          stroke: '#000000',
           strokeWidth: 3
         })
         break
@@ -87,7 +87,7 @@ export class ToolManager {
           x,
           y,
           d: `M ${x} ${y}`,
-          stroke: this.getRandomColor(),
+          stroke: '#000000',
           strokeWidth: 3
         })
         break

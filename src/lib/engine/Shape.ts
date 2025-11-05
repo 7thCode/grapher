@@ -115,7 +115,7 @@ export class Rect {
   constructor(public props: RectProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1, rotation = 0 } = this.props
+    const { x, y, width, height, fill = '#ffffff', stroke, strokeWidth = 1, rotation = 0 } = this.props
 
     ctx.save()
 
@@ -153,7 +153,7 @@ export class Rect {
   }
 
   toSVG(): string {
-    const { x, y, width, height, fill = '#4CAF50', stroke, strokeWidth = 1, rotation = 0 } = this.props
+    const { x, y, width, height, fill = '#ffffff', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
     const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${x + width/2} ${y + height/2})"` : ''
     
@@ -187,7 +187,7 @@ export class Circle {
   constructor(public props: CircleProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1, rotation = 0 } = this.props
+    const { cx, cy, r, fill = '#ffffff', stroke, strokeWidth = 1, rotation = 0 } = this.props
 
     ctx.save()
 
@@ -232,7 +232,7 @@ export class Circle {
   }
 
   toSVG(): string {
-    const { cx, cy, r, fill = '#FF5722', stroke, strokeWidth = 1, rotation = 0 } = this.props
+    const { cx, cy, r, fill = '#ffffff', stroke, strokeWidth = 1, rotation = 0 } = this.props
     const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="${strokeWidth}"` : ''
     const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${cx} ${cy})"` : ''
     
@@ -267,7 +267,7 @@ export class Line {
   constructor(public props: LineProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2, rotation = 0 } = this.props
+    const { x1, y1, x2, y2, stroke = '#000000', strokeWidth = 2, rotation = 0 } = this.props
 
     ctx.save()
 
@@ -325,7 +325,7 @@ export class Line {
   }
 
   toSVG(): string {
-    const { x1, y1, x2, y2, stroke = '#2196F3', strokeWidth = 2, rotation = 0 } = this.props
+    const { x1, y1, x2, y2, stroke = '#000000', strokeWidth = 2, rotation = 0 } = this.props
     const transformAttr = rotation !== 0 ? `transform="rotate(${rotation} ${(x1+x2)/2} ${(y1+y2)/2})"` : ''
     return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${strokeWidth}" ${transformAttr} />`
   }
@@ -371,7 +371,7 @@ export class Path {
   constructor(public props: PathProps) {}
 
   render(ctx: CanvasRenderingContext2D) {
-    const { d, fill, stroke = '#9C27B0', strokeWidth = 2, rotation = 0 } = this.props
+    const { d, fill, stroke = '#000000', strokeWidth = 2, rotation = 0 } = this.props
 
     ctx.save()
 
@@ -426,7 +426,7 @@ export class Path {
   }
 
   toSVG(): string {
-    const { d, fill, stroke = '#9C27B0', strokeWidth = 2, rotation = 0 } = this.props
+    const { d, fill, stroke = '#000000', strokeWidth = 2, rotation = 0 } = this.props
     
     // Handle gradient or solid fill
     let fillAttr = 'fill="none"'
