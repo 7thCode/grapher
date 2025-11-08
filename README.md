@@ -1,47 +1,217 @@
-# Svelte + TS + Vite
+# Grapher
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+Electronベースのベクターグラフィックスエディタ。直感的なUIでベジェ曲線を含む図形の作成・編集が可能です。
 
-## Recommended IDE Setup
+## 主な機能
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+- **図形描画**
+  - 矩形、円形、パス（ベジェ曲線）、テキストボックス
+  - スムーズな曲線を自動生成するパスツール
 
-## Need an official Svelte framework?
+- **ベジェ曲線編集**
+  - Illustratorスタイルのパス編集
+  - アンカーポイントと制御点の個別操作
+  - ポイントタイプ（スムーズ/対称/コーナー）の切り替え
+  - ポイントの追加・削除
+  - 閉じたパスのサポート
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+- **選択とレイアウト**
+  - 複数選択（ドラッグ選択、Shift選択）
+  - 整列・分配ツール
+  - グループ化
+  - レイヤー管理（前面/背面への移動）
 
-## Technical considerations
+- **編集機能**
+  - リサイズ、回転、移動
+  - グリッドスナップ
+  - アンドゥ/リドゥ
+  - コピー&ペースト
 
-**Why use this over SvelteKit?**
+- **ファイル操作**
+  - SVG形式でのエクスポート/インポート
+  - プロジェクトファイルの保存/読み込み
+  - 未保存変更の確認ダイアログ
 
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
+## インストール方法
 
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
+### 開発版の実行
 
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
+```bash
+# 依存関係のインストール
+npm install
 
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+# 開発サーバーの起動
+npm run dev
 ```
+
+### アプリケーションのビルド
+
+```bash
+# 全プラットフォーム向けビルド
+npm run build
+
+# macOS向け
+npm run package:mac
+
+# Windows向け
+npm run package:win
+
+# Linux向け
+npm run package:linux
+```
+
+ビルドされたアプリケーションは`release/`ディレクトリに生成されます。
+
+## 使い方
+
+### 基本操作
+
+1. **ツールの選択**
+   - 左側のツールパレットから使用するツールを選択
+   - キーボードショートカットも利用可能（V: 選択, R: 矩形, C: 円, P: パス, T: テキスト）
+
+2. **図形の作成**
+   - **矩形/円**: キャンバス上でドラッグして作成
+   - **パス**: クリックでアンカーポイントを配置、3点以上で自動的にスムーズな曲線を生成
+     - 最初のポイント近くをクリックで閉じたパスを作成
+     - ダブルクリックまたはEnterキーで開いたパスを完成
+   - **テキスト**: ドラッグしてテキストボックスを作成、即座に編集モードに入る
+
+3. **図形の編集**
+   - **選択**: 選択ツール（V）で図形をクリック
+   - **移動**: 選択した図形をドラッグ
+   - **リサイズ**: 選択した図形の四隅や辺のハンドルをドラッグ
+   - **回転**: 選択した図形の回転ハンドルをドラッグ
+
+4. **パスの編集**
+   - 選択ツールでパスをダブルクリックして編集モードに入る
+   - アンカーポイント（白い正方形）をドラッグして移動
+   - 制御点（青い円）をドラッグして曲線の形状を調整
+   - ツールバーまたはキーボードで操作：
+     - `A`: ポイントを追加
+     - `D`: ポイントを削除
+     - `C`: ベジェ曲線に変換
+     - `L`: 直線に変換
+     - `1`: スムーズポイント
+     - `2`: 対称ポイント
+     - `3`: コーナーポイント
+     - `ESC`: 編集終了
+
+5. **複数選択**
+   - Shiftキーを押しながらクリックで複数選択
+   - 空白エリアをドラッグして範囲選択
+   - Shift+ドラッグで追加選択
+
+6. **整列とレイアウト**
+   - 複数の図形を選択後、ツールバーの整列ボタンを使用
+   - 左揃え、中央揃え、右揃え、上揃え、中央揃え、下揃え
+   - 水平分配、垂直分配
+
+### スタイル設定
+
+右側のプロパティパネルで以下の設定が可能：
+
+- **塗りつぶし**: 色の選択、透明度の調整
+- **線**: 色、幅、透明度の調整
+- **テキスト**: フォントサイズ、色、フォントファミリー
+
+### ファイル操作
+
+- **新規作成**: `Cmd/Ctrl + N`
+- **開く**: `Cmd/Ctrl + O`
+- **保存**: `Cmd/Ctrl + S`
+- **名前を付けて保存**: `Cmd/Ctrl + Shift + S`
+- **SVGエクスポート**: ファイルメニューから選択
+
+### その他の操作
+
+- **アンドゥ**: `Cmd/Ctrl + Z`
+- **リドゥ**: `Cmd/Ctrl + Shift + Z`
+- **コピー**: `Cmd/Ctrl + C`
+- **ペースト**: `Cmd/Ctrl + V`
+- **削除**: `Delete` または `Backspace`
+- **グループ化**: `Cmd/Ctrl + G`
+- **グループ解除**: `Cmd/Ctrl + Shift + G`
+- **前面へ**: `Cmd/Ctrl + ]`
+- **背面へ**: `Cmd/Ctrl + [`
+- **最前面へ**: `Cmd/Ctrl + Shift + ]`
+- **最背面へ**: `Cmd/Ctrl + Shift + [`
+
+## 開発環境
+
+### 必要な環境
+
+- Node.js 18以上
+- npm または yarn
+
+### 技術スタック
+
+- **フレームワーク**: Electron 38.x
+- **UI**: Svelte 5 (runes mode)
+- **ビルドツール**: Vite 7.x
+- **言語**: TypeScript 5.9.x
+
+### プロジェクト構成
+
+```
+grapher/
+├── src/
+│   ├── lib/
+│   │   ├── engine/          # コアエンジン
+│   │   │   ├── Shape.ts     # 図形クラス
+│   │   │   ├── Renderer.ts  # レンダリングエンジン
+│   │   │   ├── Tool.ts      # ツールマネージャー
+│   │   │   ├── PathEditManager.ts  # パス編集
+│   │   │   ├── TransformControls.ts # 変形コントロール
+│   │   │   └── SnapManager.ts       # スナップ機能
+│   │   └── Canvas.svelte    # メインキャンバス
+│   ├── App.svelte           # アプリケーションルート
+│   └── main.ts              # エントリーポイント
+├── electron/
+│   └── main.ts              # Electronメインプロセス
+├── CLAUDE.md                # 開発ログ
+└── package.json
+```
+
+### デバッグ
+
+開発モードで実行中、以下のショートカットが利用可能：
+
+- `Cmd/Ctrl + R`: リロード
+- `Cmd/Ctrl + Shift + I`: 開発者ツールを開く
+
+## ライセンス
+
+このプロジェクトは[MITライセンス](LICENSE)の下で公開されています。
+
+## 貢献
+
+バグ報告や機能要望は、GitHubのIssuesでお願いします。
+
+## 更新履歴
+
+詳細な開発ログは`CLAUDE.md`を参照してください。
+
+### 主な実装済み機能
+
+- ✅ 基本図形の描画（矩形、円、パス、テキスト）
+- ✅ ベジェ曲線編集（Illustratorスタイル）
+- ✅ 閉じたパスのサポート
+- ✅ ポイントタイプの切り替え（スムーズ/対称/コーナー）
+- ✅ 複数選択（ドラッグ選択、Shift選択）
+- ✅ 整列・分配ツール
+- ✅ グリッドスナップ
+- ✅ SVGエクスポート/インポート
+- ✅ アンドゥ/リドゥ
+- ✅ グループ化
+- ✅ レイヤー管理
+- ✅ テキスト編集（改行サポート）
+- ✅ 未保存変更の確認
+
+## 謝辞
+
+このプロジェクトは以下のオープンソースプロジェクトを使用しています：
+
+- [Electron](https://www.electronjs.org/)
+- [Svelte](https://svelte.dev/)
+- [Vite](https://vitejs.dev/)
