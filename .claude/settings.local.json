@@ -33,7 +33,8 @@
       "mcp__serena__initial_instructions",
       "mcp__serena__read_file",
       "mcp__serena__replace_regex",
-      "mcp__serena__think_about_whether_you_are_done"
+      "mcp__serena__think_about_whether_you_are_done",
+      "Bash(npm run package:mac:*)"
     ],
     "deny": [],
     "ask": []
