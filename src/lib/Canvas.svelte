@@ -4,7 +4,7 @@
   import { ToolManager, type ToolType } from './engine/Tool'
   import type { HandleType } from './engine/TransformControls'
   import { saveSVGFile } from './utils/electron'
-  import type { Shape, LinearGradient } from './engine/Shape'
+  import type { Shape, LinearGradient, GradientStop, PathPoint } from './engine/Shape'
   import { Rect, Circle, Line, Path, TextBox, isGradient } from './engine/Shape'
 
   let canvas: HTMLCanvasElement
@@ -1275,11 +1275,47 @@
 
   function clearCanvas() {
     if (!renderer) return
+
+    // Stop path editing mode if active
+    if (isEditingPath) {
+      stopPathEditing()
+    }
+
+    // Stop text editing mode if active
+    if (isEditingText && textEditorDiv) {
+      textEditorDiv.remove()
+      textEditorDiv = null
+      editingTextBox = null
+      isEditingText = false
+    }
+
+    // Clear selection
+    renderer.selectShape(null)
+    hasSelection = false
+
+    // Remove all shapes
     const shapes = renderer.getShapes()
     shapes.forEach((s) => renderer.removeShape(s.props.id))
+
+    // Reset other state variables
+    selectedPathPointIndex = null
+    clipboardShape = null
+    currentFilePath = null  // Reset file path (new document state)
+
+    // Reset dirty flag
+    setDirty(false)
+
+    // Render to update display
+    renderer.render()
   }
 
   async function openLoadDialog() {
+    // Check for unsaved changes
+    if (isDirty) {
+      const shouldContinue = confirm('You have unsaved changes. Loading a new file will discard them. Continue?')
+      if (!shouldContinue) return
+    }
+
     // Try Electron IPC first
     const ipcRenderer = typeof window !== 'undefined' ? (window as any).ipcRenderer : null
 
@@ -1309,14 +1345,138 @@
     const file = target.files?.[0]
     if (!file) return
 
+    // Check for unsaved changes
+    if (isDirty) {
+      const shouldContinue = confirm('You have unsaved changes. Loading a new file will discard them. Continue?')
+      if (!shouldContinue) {
+        target.value = '' // Reset input
+        return
+      }
+    }
+
     try {
       const text = await file.text()
       loadSVG(text)
+      currentFilePath = null // File selected from browser, no disk path
+      setDirty(false)
       target.value = '' // Reset input
     } catch (err) {
       console.error('Failed to load SVG:', err)
       alert('Failed to load SVG file')
     }
+  }
+
+  /**
+   * Parse SVG path data (d attribute) into PathPoint array
+   */
+  function parsePathData(d: string): PathPoint[] {
+    const points: PathPoint[] = []
+    const commands = d.match(/[MLCQZ][^MLCQZ]*/gi)
+    if (!commands) return points
+
+    for (const cmd of commands) {
+      const type = cmd[0].toUpperCase()
+      const coords = cmd
+        .slice(1)
+        .trim()
+        .split(/[\s,]+/)
+        .map(parseFloat)
+        .filter(n => !isNaN(n))
+
+      if (type === 'M' && coords.length >= 2) {
+        points.push({
+          x: coords[0],
+          y: coords[1],
+          type: 'M'
+        })
+      } else if (type === 'L' && coords.length >= 2) {
+        points.push({
+          x: coords[0],
+          y: coords[1],
+          type: 'L'
+        })
+      } else if (type === 'C' && coords.length >= 6) {
+        points.push({
+          x: coords[4],
+          y: coords[5],
+          type: 'C',
+          cp1x: coords[0],
+          cp1y: coords[1],
+          cp2x: coords[2],
+          cp2y: coords[3]
+        })
+      } else if (type === 'Q' && coords.length >= 4) {
+        points.push({
+          x: coords[2],
+          y: coords[3],
+          type: 'Q',
+          cpx: coords[0],
+          cpy: coords[1]
+        })
+      }
+    }
+
+    return points
+  }
+
+  /**
+   * Parse gradient definitions from SVG
+   */
+  function parseGradients(svg: Element): Map<string, LinearGradient> {
+    const gradients = new Map<string, LinearGradient>()
+    const defs = svg.querySelector('defs')
+    if (!defs) return gradients
+
+    const linearGradients = defs.querySelectorAll('linearGradient')
+    linearGradients.forEach((lg) => {
+      const id = lg.getAttribute('id')
+      if (!id) return
+
+      const x1 = parseFloat(lg.getAttribute('x1') || '0')
+      const y1 = parseFloat(lg.getAttribute('y1') || '0')
+      const x2 = parseFloat(lg.getAttribute('x2') || '0')
+      const y2 = parseFloat(lg.getAttribute('y2') || '100')
+
+      let angle = 0
+      if (x2 > x1) angle = 90
+      else if (y2 > y1) angle = 0
+
+      const stops: GradientStop[] = []
+      const stopElements = lg.querySelectorAll('stop')
+      stopElements.forEach((stop) => {
+        let offsetStr = stop.getAttribute('offset') || '0'
+        // Remove % if present
+        offsetStr = offsetStr.replace('%', '')
+        let offset = parseFloat(offsetStr)
+        // Convert from 0-100 range to 0.0-1.0 range if needed
+        if (offset > 1) {
+          offset = offset / 100
+        }
+        const stopColor = stop.getAttribute('stop-color') || '#000000'
+        stops.push({ offset, color: stopColor })
+      })
+
+      if (stops.length > 0) {
+        gradients.set(id, { type: 'linear', stops, angle })
+      }
+    })
+
+    return gradients
+  }
+
+  /**
+   * Parse fill attribute - returns either a color string or a LinearGradient object
+   */
+  function parseFill(fillAttr: string | null, gradients: Map<string, LinearGradient>): string | LinearGradient | undefined {
+    if (!fillAttr || fillAttr === 'none') return undefined
+
+    const urlMatch = fillAttr.match(/url\(#([^)]+)\)/)
+    if (urlMatch) {
+      const gradientId = urlMatch[1]
+      return gradients.get(gradientId)
+    }
+
+    return fillAttr
   }
 
   function parseRotation(element: Element): number | undefined {
@@ -1334,6 +1494,9 @@
   function loadSVG(svgString: string) {
     if (!renderer) return
 
+    // Clear existing shapes before loading new file
+    clearCanvas()
+
     const parser = new DOMParser()
     const doc = parser.parseFromString(svgString, 'image/svg+xml')
     const svg = doc.querySelector('svg')
@@ -1342,6 +1505,9 @@
       return
     }
 
+    // Parse gradient definitions first
+    const gradients = parseGradients(svg)
+
     // Parse rect elements
     const rects = svg.querySelectorAll('rect')
     rects.forEach((rect) => {
@@ -1349,7 +1515,7 @@
       const y = parseFloat(rect.getAttribute('y') || '0')
       const width = parseFloat(rect.getAttribute('width') || '0')
       const height = parseFloat(rect.getAttribute('height') || '0')
-      const fill = rect.getAttribute('fill') || '#4CAF50'
+      const fill = parseFill(rect.getAttribute('fill'), gradients) || '#4CAF50'
       const stroke = rect.getAttribute('stroke') || undefined
       const strokeWidth = parseFloat(rect.getAttribute('stroke-width') || '1')
       const rotation = parseRotation(rect)
@@ -1374,7 +1540,7 @@
       const cx = parseFloat(circle.getAttribute('cx') || '0')
       const cy = parseFloat(circle.getAttribute('cy') || '0')
       const r = parseFloat(circle.getAttribute('r') || '0')
-      const fill = circle.getAttribute('fill') || '#4CAF50'
+      const fill = parseFill(circle.getAttribute('fill'), gradients) || '#4CAF50'
       const stroke = circle.getAttribute('stroke') || undefined
       const strokeWidth = parseFloat(circle.getAttribute('stroke-width') || '1')
       const rotation = parseRotation(circle)
@@ -1423,23 +1589,34 @@
     // Parse path elements
     const paths = svg.querySelectorAll('path')
     paths.forEach((path) => {
-      const d = path.getAttribute('d') || ''
-      const stroke = path.getAttribute('stroke') || '#333'
-      const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
-      const fill = path.getAttribute('fill') || 'none'
-      const rotation = parseRotation(path)
+      try {
+        const d = path.getAttribute('d') || ''
+        const stroke = path.getAttribute('stroke') || '#333'
+        const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
+        const fillAttr = path.getAttribute('fill')
+        const fill = fillAttr === 'none' ? undefined : (parseFill(fillAttr, gradients))
+        const rotation = parseRotation(path)
 
-      const shape = new Path({
-        id: `path-${Date.now()}-${Math.random()}`,
-        x: 0,
-        y: 0,
-        d,
-        stroke,
-        strokeWidth,
-        fill: fill === 'none' ? undefined : fill,
-        rotation
-      })
-      renderer.addShape(shape)
+        // Parse path data into points array for editing
+        const points = parsePathData(d)
+        const closed = d.trim().toUpperCase().endsWith('Z')
+
+        const shape = new Path({
+          id: `path-${Date.now()}-${Math.random()}`,
+          x: 0,
+          y: 0,
+          d,
+          points,
+          closed,
+          stroke,
+          strokeWidth,
+          fill,
+          rotation
+        })
+        renderer.addShape(shape)
+      } catch (err) {
+        console.error('Error parsing path element:', err, path)
+      }
     })
 
     // Parse foreignObject elements (text boxes)
@@ -1494,6 +1671,12 @@
       })
       renderer.addShape(shape)
     })
+
+    // Force re-render after loading all shapes
+    renderer.render()
+
+    // Reset dirty flag after loading (shapes were added via addShape which triggers onChange)
+    setDirty(false)
   }
 
   /**

@@ -1,5 +1,375 @@
 # Grapher - 開発ログ
 
+## 2025-11-09 - Load前のキャンバス完全初期化
+
+### 問題
+ファイルをLoadする前に、キャンバスの状態を完全に初期化する必要がある。以前の実装では、シェイプを削除するだけで、編集モードや選択状態がリセットされていなかった。
+
+### 原因
+
+**問題1: clearCanvas()の不完全な初期化**
+`clearCanvas()`関数が以下の処理のみを行っていた：
+- シェイプの削除
+
+しかし、以下の状態がリセットされていなかった：
+- パス編集モード (`isEditingPath`, `editingPath`, `selectedPathPointIndex`)
+- テキスト編集モード (`isEditingText`, `editingTextBox`, `textEditorDiv`)
+- 選択状態 (`hasSelection`, Rendererの選択)
+- クリップボード (`clipboardShape`)
+- ファイルパス (`currentFilePath`)
+- ダーティフラグ (`isDirty`)
+
+**問題2: loadSVG()でのダーティフラグ管理**
+`loadSVG()`内で`renderer.addShape()`を呼ぶ度に`onChangeCallback`が発火し、`setDirty(true)`が呼ばれていた。そのため、Load完了後も`isDirty`が`true`のままになっていた。
+
+### 修正内容
+
+#### 1. Canvas.svelte:1276-1310 - clearCanvas()関数の拡張
+
+```typescript
+function clearCanvas() {
+  if (!renderer) return
+
+  // Stop path editing mode if active
+  if (isEditingPath) {
+    stopPathEditing()
+  }
+
+  // Stop text editing mode if active
+  if (isEditingText && textEditorDiv) {
+    textEditorDiv.remove()
+    textEditorDiv = null
+    editingTextBox = null
+    isEditingText = false
+  }
+
+  // Clear selection
+  renderer.selectShape(null)
+  hasSelection = false
+
+  // Remove all shapes
+  const shapes = renderer.getShapes()
+  shapes.forEach((s) => renderer.removeShape(s.props.id))
+
+  // Reset other state variables
+  selectedPathPointIndex = null
+  clipboardShape = null
+  currentFilePath = null  // ← 追加: ファイルパスをリセット
+
+  // Reset dirty flag
+  setDirty(false)
+
+  // Render to update display
+  renderer.render()
+}
+```
+
+#### 2. Canvas.svelte:1677-1678 - loadSVG()の最後でダーティフラグをリセット
+
+```typescript
+function loadSVG(svgString: string) {
+  // ... シェイプの読み込み処理
+
+  // Force re-render after loading all shapes
+  renderer.render()
+
+  // Reset dirty flag after loading (shapes were added via addShape which triggers onChange)
+  setDirty(false)  // ← 追加
+}
+```
+
+これにより、Load中に`renderer.addShape()`が`onChangeCallback`を発火して`isDirty`が`true`になっても、最後に確実に`false`にリセットされる。
+
+### 結果
+
+✅ **ファイルLoad前にパス編集モードが終了する**
+✅ **ファイルLoad前にテキスト編集モードが終了する**
+✅ **ファイルLoad前に選択状態がクリアされる**
+✅ **ファイルLoad前にファイルパスがリセットされる（新規ドキュメント状態）**
+✅ **ファイルLoad前にすべての編集関連状態がリセットされる**
+✅ **Load完了後にダーティフラグが確実にfalseになる**
+✅ **クリーンな状態で新しいファイルが読み込まれる**
+
+### 技術詳細
+
+**clearCanvas()の初期化順序:**
+1. パス編集モード終了（`stopPathEditing()`）
+2. テキスト編集モード終了（DOM要素削除とフラグリセット）
+3. 選択状態クリア（`renderer.selectShape(null)`）
+4. すべてのシェイプ削除
+5. その他の状態変数リセット（クリップボード、選択ポイント、ファイルパス等）
+6. ダーティフラグリセット
+7. 再描画
+
+**onChangeCallbackの問題と解決:**
+- **問題**: `renderer.setOnChangeCallback(() => { setDirty(true); ... })`が設定されているため、`addShape()`の度に`isDirty`が`true`になる
+- **解決**: `loadSVG()`の最後で`setDirty(false)`を呼び、Load完了後に確実にリセット
+
+**状態管理の完全性:**
+- 編集モード、選択状態、シェイプデータ、ファイルパス、UI状態のすべてを一括でリセット
+- 新しいファイル読み込み時に予期しない動作を防止
+- Load完了後は常に「保存済み」状態（`isDirty = false`）
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte`
+  - clearCanvas()関数の拡張（行1276-1310）: currentFilePathのリセット追加
+  - loadSVG()関数の修正（行1677-1678）: ダーティフラグのリセット追加
+
+---
+
+## 2025-11-09 - SVGファイル読み込み時のグラデーションとPath編集の修正
+
+### 問題
+1. ファイルをLoadすると編集中の画像に混ざってしまう
+2. Loadした画像の編集ができない（Path要素）
+3. 塗り色が常に黒になっている（グラデーションが失われる）
+
+### 原因
+
+#### 問題1: 編集中の画像に混ざる
+`loadSVG` 関数が既存のシェイプをクリアせずに新しいシェイプを追加していた。
+
+#### 問題2: Path編集不可
+Path要素をロードする際、`d`属性（SVG pathデータ文字列）のみを保存し、編集に必要な`points`配列を生成していなかった。Pathの編集機能は`points`配列に依存しているため、ロードしたPathは編集できなかった。
+
+#### 問題3: グラデーションが失われる
+SVGファイルには`<defs>`セクションにグラデーション定義が保存されているが、`loadSVG`関数でこれを解析していなかった。`fill`属性が`url(#gradient-xxx)`の形式でもそのまま文字列として扱われていた。
+
+### 修正内容
+
+#### 1. Canvas.svelte - ヘルパー関数の追加
+
+**parsePathData(d: string): PathPoint[]**
+- SVG pathデータ（`d`属性）を解析して`PathPoint`配列を生成
+- 'M', 'L', 'C', 'Q'コマンドをパースしてアンカーポイントと制御点を抽出
+
+```typescript
+function parsePathData(d: string): PathPoint[] {
+  const points: PathPoint[] = []
+  const commands = d.match(/[MLCQZ][^MLCQZ]*/gi)
+
+  for (const cmd of commands) {
+    const type = cmd[0].toUpperCase()
+    const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat)
+
+    if (type === 'M' && coords.length >= 2) {
+      points.push({ x: coords[0], y: coords[1], type: 'M' })
+    } else if (type === 'C' && coords.length >= 6) {
+      points.push({
+        x: coords[4],
+        y: coords[5],
+        type: 'C',
+        cp1x: coords[0], cp1y: coords[1],
+        cp2x: coords[2], cp2y: coords[3]
+      })
+    }
+    // ...
+  }
+
+  return points
+}
+```
+
+**parseGradients(svg: Element): Map<string, LinearGradient>**
+- SVGの`<defs>`セクションから`<linearGradient>`要素を解析
+- グラデーションIDをキーとしたMapを返す
+
+```typescript
+function parseGradients(svg: Element): Map<string, LinearGradient> {
+  const gradients = new Map<string, LinearGradient>()
+  const defs = svg.querySelector('defs')
+  if (!defs) return gradients
+
+  const linearGradients = defs.querySelectorAll('linearGradient')
+  linearGradients.forEach((lg) => {
+    const id = lg.getAttribute('id')
+    const stops: GradientStop[] = []
+
+    lg.querySelectorAll('stop').forEach((stop) => {
+      const offset = parseFloat(stop.getAttribute('offset') || '0')
+      const color = stop.getAttribute('stop-color') || '#000000'
+      stops.push({ offset, color })
+    })
+
+    if (stops.length > 0) {
+      gradients.set(id, { type: 'linear', stops, angle: 0 })
+    }
+  })
+
+  return gradients
+}
+```
+
+**parseFill(fillAttr: string, gradients: Map): string | LinearGradient | undefined**
+- `fill`属性を解析してグラデーントオブジェクトまたは色文字列を返す
+- `url(#gradient-xxx)`形式の場合はグラデーションオブジェクトを返す
+
+```typescript
+function parseFill(fillAttr: string | null, gradients: Map<string, LinearGradient>) {
+  if (!fillAttr || fillAttr === 'none') return undefined
+
+  const urlMatch = fillAttr.match(/url\(#([^)]+)\)/)
+  if (urlMatch) {
+    const gradientId = urlMatch[1]
+    return gradients.get(gradientId)
+  }
+
+  return fillAttr
+}
+```
+
+#### 2. Canvas.svelte:1456-1461 - loadSVG関数の修正
+
+```typescript
+function loadSVG(svgString: string) {
+  if (!renderer) return
+
+  // Clear existing shapes before loading new file
+  clearCanvas()
+
+  // ...
+
+  // Parse gradient definitions first
+  const gradients = parseGradients(svg)
+
+  // ...
+}
+```
+
+#### 3. Canvas.svelte - 各シェイプのfill処理を修正
+
+Rect、Circle要素:
+```typescript
+const fill = parseFill(rect.getAttribute('fill'), gradients) || '#4CAF50'
+```
+
+Path要素:
+```typescript
+const fillAttr = path.getAttribute('fill')
+const fill = parseFill(fillAttr, gradients) || (fillAttr === 'none' ? undefined : undefined)
+
+// Parse path data into points array for editing
+const points = parsePathData(d)
+const closed = d.trim().toUpperCase().endsWith('Z')
+
+const shape = new Path({
+  // ...
+  d,
+  points,  // ← 追加
+  closed,  // ← 追加
+  fill,
+  // ...
+})
+```
+
+#### 4. Canvas.svelte:7 - 型定義のインポート追加
+
+```typescript
+import type { Shape, LinearGradient, GradientStop, PathPoint } from './engine/Shape'
+```
+
+#### 5. Canvas.svelte - 未保存確認の追加
+
+`openLoadDialog`と`handleFileLoad`に未保存確認を追加:
+```typescript
+if (isDirty) {
+  const shouldContinue = confirm('You have unsaved changes. Loading a new file will discard them. Continue?')
+  if (!shouldContinue) return
+}
+```
+
+#### 6. Canvas.svelte:1414-1427 - グラデーントoffsetの正規化（重要なバグ修正）
+
+**問題:** ロード後に何も表示されない問題が発生。コンソールに以下のエラー:
+```
+IndexSizeError: Failed to execute 'addColorStop' on 'CanvasGradient': 
+The provided value (100) is outside the range (0.0, 1.0).
+```
+
+**原因:** SVGの`offset`属性は0-100の範囲（例: `offset="0"`, `offset="100"`）だが、Canvas APIの`addColorStop()`は0.0-1.0の範囲を要求する。
+
+**修正:**
+```typescript
+function parseGradients(svg: Element): Map<string, LinearGradient> {
+  // ...
+  stopElements.forEach((stop) => {
+    let offsetStr = stop.getAttribute('offset') || '0'
+    // Remove % if present
+    offsetStr = offsetStr.replace('%', '')
+    let offset = parseFloat(offsetStr)
+    // Convert from 0-100 range to 0.0-1.0 range if needed
+    if (offset > 1) {
+      offset = offset / 100
+    }
+    const stopColor = stop.getAttribute('stop-color') || '#000000'
+    stops.push({ offset, color: stopColor })
+  })
+  // ...
+}
+```
+
+#### 7. デバッグログのクリーンアップ
+
+問題解決後、以下のデバッグ用console.logステートメントを削除:
+- `console.log('TextBoxes parsed:', foreignObjects.length)`
+- `console.log('Rendering loaded shapes, total shapes:', renderer.getShapes().length)`
+- `console.log('loadSVG completed successfully')`
+- `console.log('Paths parsed:', paths.length)`
+- `console.log('Loading path:', { d, pointsCount, closed, fill })`
+
+### 結果
+
+✅ **ファイルロード時に既存のシェイプがクリアされる**
+✅ **グラデーション塗りが正しく復元される**
+✅ **Pathの`points`配列が生成され、編集可能になる**
+✅ **閉じたPathの`closed`フラグが正しく設定される**
+✅ **すべてのファイル読み込み方法で未保存確認が表示される**
+
+### 使い方
+
+1. ファイルメニューから「開く」または Cmd+O
+2. 未保存の変更がある場合は確認ダイアログが表示される
+3. SVGファイルを選択
+4. グラデーション付きのシェイプが正しく表示される
+5. Loadしたパスをダブルクリックして編集モードに入れる
+
+### 技術詳細
+
+**SVGのグラデーント構造:**
+```xml
+<defs>
+  <linearGradient id="gradient-rect-123">
+    <stop offset="0" stop-color="#ff0000"/>
+    <stop offset="1" stop-color="#0000ff"/>
+  </linearGradient>
+</defs>
+<rect fill="url(#gradient-rect-123)" .../>
+```
+
+**Pathのデータ構造:**
+- `d`: SVG pathデータ文字列（描画用）
+- `points`: PathPoint配列（編集用）
+- `closed`: パスが閉じているかどうか
+
+**グラデーントの保存形式:**
+```typescript
+{
+  type: 'linear',
+  stops: [
+    { offset: 0, color: '#ff0000' },
+    { offset: 1, color: '#0000ff' }
+  ],
+  angle: 0
+}
+```
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - ヘルパー関数追加、loadSVG修正、型インポート、未保存確認
+
+---
+
 ## 2025-11-03 - 閉じたPath表示問題の修正
 
 ### 問題
