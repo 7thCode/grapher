@@ -568,84 +568,141 @@ export class PathEditManager {
 
     point.pointType = pointType
 
-    // Get IN-handle and OUT-handle
+    // Get IN-handle and OUT-handle references
     const isClosed = this.selectedPath.props.closed
     const isLastPoint = pointIndex === points.length - 1
     
-    const inHandle = point.cp2x !== undefined && point.cp2y !== undefined
+    const hasInHandle = point.cp2x !== undefined && point.cp2y !== undefined
     
-    let outHandle = false
+    let hasOutHandle = false
     let nextPoint = null
     if (pointIndex + 1 < points.length) {
       nextPoint = points[pointIndex + 1]
-      outHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
+      hasOutHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
     } else if (isClosed && isLastPoint) {
       nextPoint = points[0]
-      outHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
+      hasOutHandle = nextPoint.cp1x !== undefined && nextPoint.cp1y !== undefined
     }
 
-    if (!inHandle && !outHandle) return
+    // If no control points, nothing to adjust
+    if (!hasInHandle && !hasOutHandle) return
 
-    // Adjust control points based on the new point type
+    // For 'corner', just set the type and return (no adjustment needed)
+    if (pointType === 'corner') {
+      this.updatePathData()
+      this.updateHandles()
+      return
+    }
+
+    // Calculate current control point vectors and lengths
+    let cp1VecX = 0, cp1VecY = 0, cp1Length = 0
+    let cp2VecX = 0, cp2VecY = 0, cp2Length = 0
+
+    if (hasOutHandle && nextPoint) {
+      cp1VecX = nextPoint.cp1x! - point.x
+      cp1VecY = nextPoint.cp1y! - point.y
+      cp1Length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
+    }
+
+    if (hasInHandle) {
+      cp2VecX = point.cp2x! - point.x
+      cp2VecY = point.cp2y! - point.y
+      cp2Length = Math.sqrt(cp2VecX * cp2VecX + cp2VecY * cp2VecY)
+    }
+
+    // Default length if a control point has zero length
+    const defaultLength = 50
+
+    // Handle symmetrical point type
     if (pointType === 'symmetrical') {
-      // Symmetrical: mirror control points with same length
-      let cp1Length = 0
-      let cp2Length = 0
-      
-      if (outHandle && nextPoint) {
-        cp1Length = Math.sqrt(
-          (nextPoint.cp1x! - point.x) ** 2 + (nextPoint.cp1y! - point.y) ** 2
-        )
+      // Calculate average length (use default if both are 0)
+      let avgLength = (cp1Length + cp2Length) / 2
+      if (avgLength === 0) avgLength = defaultLength
+
+      // Determine reference direction
+      let refVecX = 0, refVecY = 0, refLength = 0
+
+      if (cp1Length > 0) {
+        // Use OUT-handle direction
+        refVecX = cp1VecX
+        refVecY = cp1VecY
+        refLength = cp1Length
+      } else if (cp2Length > 0) {
+        // Use IN-handle direction (reversed)
+        refVecX = -cp2VecX
+        refVecY = -cp2VecY
+        refLength = cp2Length
+      } else if (hasOutHandle && nextPoint) {
+        // No existing direction, create horizontal default
+        refVecX = 1
+        refVecY = 0
+        refLength = 1
+      } else if (hasInHandle) {
+        refVecX = -1
+        refVecY = 0
+        refLength = 1
       }
-      
-      if (inHandle) {
-        cp2Length = Math.sqrt(
-          (point.cp2x! - point.x) ** 2 + (point.cp2y! - point.y) ** 2
-        )
-      }
-      
-      const avgLength = (cp1Length + cp2Length) / 2
 
-      // Use OUT-handle direction as reference
-      if (outHandle && nextPoint) {
-        const cp1VecX = nextPoint.cp1x! - point.x
-        const cp1VecY = nextPoint.cp1y! - point.y
-        const cp1Len = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
+      if (refLength > 0) {
+        const normX = refVecX / refLength
+        const normY = refVecY / refLength
 
-        if (cp1Len > 0) {
-          const normX = cp1VecX / cp1Len
-          const normY = cp1VecY / cp1Len
-
+        // Set both handles to same length, opposite directions
+        if (hasOutHandle && nextPoint) {
           nextPoint.cp1x = point.x + normX * avgLength
           nextPoint.cp1y = point.y + normY * avgLength
-          
-          if (inHandle) {
-            point.cp2x = point.x - normX * avgLength
-            point.cp2y = point.y - normY * avgLength
-          }
         }
-      }
-    } else if (pointType === 'smooth') {
-      // Smooth: align control points on a line but keep their individual lengths
-      if (outHandle && inHandle && nextPoint) {
-        const cp1VecX = nextPoint.cp1x! - point.x
-        const cp1VecY = nextPoint.cp1y! - point.y
-        const cp1Length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
-        const cp2Length = Math.sqrt(
-          (point.cp2x! - point.x) ** 2 + (point.cp2y! - point.y) ** 2
-        )
 
-        if (cp1Length > 0) {
-          const normX = cp1VecX / cp1Length
-          const normY = cp1VecY / cp1Length
-
-          // Align IN-handle in opposite direction
-          point.cp2x = point.x - normX * cp2Length
-          point.cp2y = point.y - normY * cp2Length
+        if (hasInHandle) {
+          point.cp2x = point.x - normX * avgLength
+          point.cp2y = point.y - normY * avgLength
         }
       }
     }
-    // Corner: do nothing (control points stay independent)
+    // Handle smooth point type
+    else if (pointType === 'smooth') {
+      // Determine reference direction
+      let refVecX = 0, refVecY = 0, refLength = 0
+
+      if (cp1Length > 0) {
+        // Use OUT-handle direction
+        refVecX = cp1VecX
+        refVecY = cp1VecY
+        refLength = cp1Length
+      } else if (cp2Length > 0) {
+        // Use IN-handle direction (reversed)
+        refVecX = -cp2VecX
+        refVecY = -cp2VecY
+        refLength = cp2Length
+      } else if (hasOutHandle && nextPoint) {
+        // No existing direction, create horizontal default
+        refVecX = 1
+        refVecY = 0
+        refLength = 1
+      } else if (hasInHandle) {
+        refVecX = -1
+        refVecY = 0
+        refLength = 1
+      }
+
+      if (refLength > 0) {
+        const normX = refVecX / refLength
+        const normY = refVecY / refLength
+
+        // Set handles in opposite directions, keeping individual lengths
+        if (hasOutHandle && nextPoint) {
+          const outLength = cp1Length > 0 ? cp1Length : defaultLength
+          nextPoint.cp1x = point.x + normX * outLength
+          nextPoint.cp1y = point.y + normY * outLength
+        }
+
+        if (hasInHandle) {
+          const inLength = cp2Length > 0 ? cp2Length : defaultLength
+          point.cp2x = point.x - normX * inLength
+          point.cp2y = point.y - normY * inLength
+        }
+      }
+    }
 
     this.updatePathData()
     this.updateHandles()

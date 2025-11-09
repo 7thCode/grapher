@@ -1,5 +1,176 @@
 # Grapher - 開発ログ
 
+## 2025-11-09 - ポイントタイプ切り替え機能の修正
+
+### 問題
+ポイントタイプ切り替えボタン（スムーズ/対称/コーナー）を押しても、制御点の位置が変わらない。
+
+### 原因
+
+**PathEditManager.ts:561-651 - setPointType()メソッドの不完全な実装**
+
+1. **IN-handleとOUT-handleの両方が必要**
+   ```typescript
+   if (!inHandle && !outHandle) return  // 早期リターン
+   
+   if (pointType === 'smooth') {
+     if (outHandle && inHandle && nextPoint) {  // 両方が必要
+       // 処理
+     }
+   }
+   ```
+   - 片方の制御点しかない場合（パスの最初/最後のポイント）は何も起きない
+
+2. **制御点の長さが0の場合の処理がない**
+   - 新しく作成したベジェ曲線など、制御点が存在しても長さが0の場合は処理されない
+
+3. **参照方向の決定ロジックが不足**
+   - symmetricalモードでOUT-handleがない場合の処理がない
+
+### 修正内容
+
+#### PathEditManager.ts:561-651 - setPointType()の完全書き直し
+
+**1. cornerタイプの早期リターン**
+```typescript
+// For 'corner', just set the type and return (no adjustment needed)
+if (pointType === 'corner') {
+  this.updatePathData()
+  this.updateHandles()
+  return
+}
+```
+
+**2. 制御点ベクトルと長さの計算**
+```typescript
+let cp1VecX = 0, cp1VecY = 0, cp1Length = 0
+let cp2VecX = 0, cp2VecY = 0, cp2Length = 0
+
+if (hasOutHandle && nextPoint) {
+  cp1VecX = nextPoint.cp1x! - point.x
+  cp1VecY = nextPoint.cp1y! - point.y
+  cp1Length = Math.sqrt(cp1VecX * cp1VecX + cp1VecY * cp1VecY)
+}
+
+if (hasInHandle) {
+  cp2VecX = point.cp2x! - point.x
+  cp2VecY = point.cp2y! - point.y
+  cp2Length = Math.sqrt(cp2VecX * cp2VecX + cp2VecY * cp2VecY)
+}
+
+const defaultLength = 50  // デフォルト長さ
+```
+
+**3. symmetrical（対称）モードの実装**
+```typescript
+if (pointType === 'symmetrical') {
+  // 平均長さを計算（両方が0ならdefaultLengthを使用）
+  let avgLength = (cp1Length + cp2Length) / 2
+  if (avgLength === 0) avgLength = defaultLength
+
+  // 参照方向を決定（優先順位: OUT-handle → IN-handle → デフォルト）
+  let refVecX = 0, refVecY = 0, refLength = 0
+
+  if (cp1Length > 0) {
+    refVecX = cp1VecX
+    refVecY = cp1VecY
+    refLength = cp1Length
+  } else if (cp2Length > 0) {
+    refVecX = -cp2VecX  // 逆方向
+    refVecY = -cp2VecY
+    refLength = cp2Length
+  } else if (hasOutHandle && nextPoint) {
+    refVecX = 1  // 水平方向
+    refVecY = 0
+    refLength = 1
+  } else if (hasInHandle) {
+    refVecX = -1
+    refVecY = 0
+    refLength = 1
+  }
+
+  // 両方の制御点を同じ長さ、反対方向に配置
+  if (refLength > 0) {
+    const normX = refVecX / refLength
+    const normY = refVecY / refLength
+
+    if (hasOutHandle && nextPoint) {
+      nextPoint.cp1x = point.x + normX * avgLength
+      nextPoint.cp1y = point.y + normY * avgLength
+    }
+
+    if (hasInHandle) {
+      point.cp2x = point.x - normX * avgLength
+      point.cp2y = point.y - normY * avgLength
+    }
+  }
+}
+```
+
+**4. smooth（スムーズ）モードの実装**
+```typescript
+else if (pointType === 'smooth') {
+  // 参照方向を決定（symmetricalと同じロジック）
+  let refVecX = 0, refVecY = 0, refLength = 0
+  // ... （省略）
+
+  // 両方の制御点を一直線上に配置、個別の長さを保持
+  if (refLength > 0) {
+    const normX = refVecX / refLength
+    const normY = refVecY / refLength
+
+    if (hasOutHandle && nextPoint) {
+      const outLength = cp1Length > 0 ? cp1Length : defaultLength
+      nextPoint.cp1x = point.x + normX * outLength
+      nextPoint.cp1y = point.y + normY * outLength
+    }
+
+    if (hasInHandle) {
+      const inLength = cp2Length > 0 ? cp2Length : defaultLength
+      point.cp2x = point.x - normX * inLength
+      point.cp2y = point.y - normY * inLength
+    }
+  }
+}
+```
+
+### 結果
+
+✅ **片方の制御点のみでも動作** - パスの最初/最後のポイントでも正常に動作
+✅ **制御点の長さが0でも動作** - デフォルト長さ（50px）が適用される
+✅ **参照方向の自動決定** - OUT-handle → IN-handle → デフォルト方向の優先順位
+✅ **symmetricalモード** - 両方の制御点を平均長さ、反対方向に配置
+✅ **smoothモード** - 両方の制御点を一直線上、個別の長さを保持
+✅ **cornerモード** - 制御点を調整せず、独立して動作
+
+### 使い方
+
+1. Pathツールで曲線を描画
+2. Selectツールでダブルクリック → 編集モード
+3. アンカーポイントを選択
+4. ツールバーのボタン（**〜**/⚖️/⌐）またはキーボード（1/2/3）で切り替え
+5. 制御点の位置が即座に変わる
+
+### 技術詳細
+
+**参照方向の優先順位:**
+1. OUT-handleの方向（cp1Length > 0）
+2. IN-handleの逆方向（cp2Length > 0）
+3. 水平方向のデフォルト（どちらも0の場合）
+
+**デフォルト長さ:**
+- `defaultLength = 50` - 制御点の長さが0の場合に使用
+
+**symmetrical vs smooth:**
+- **symmetrical**: 両方の制御点が同じ長さ、反対方向
+- **smooth**: 両方の制御点が一直線上、個別の長さを保持
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/engine/PathEditManager.ts` - setPointType()の完全書き直し
+
+---
+
 ## 2025-11-09 - Load前のキャンバス完全初期化
 
 ### 問題
