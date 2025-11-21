@@ -5,4 +5,7 @@ interface Window {
     invoke: (channel: string, ...args: any[]) => Promise<any>
     removeAllListeners: (channel: string) => void
   }
+  electron?: {
+    getAPIKey: () => Promise<{ provider: 'openai' | 'anthropic'; key: string }>
+  }
 }

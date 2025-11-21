@@ -27,4 +27,9 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   }
 })
 
+// Expose AI-related APIs
+contextBridge.exposeInMainWorld('electron', {
+  getAPIKey: () => ipcRenderer.invoke('get-api-key')
+})
+
 console.log('=== PRELOAD SCRIPT COMPLETED ===')

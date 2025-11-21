@@ -6,6 +6,7 @@
   import { saveSVGFile } from './utils/electron'
   import type { Shape, LinearGradient, GradientStop, PathPoint } from './engine/Shape'
   import { Rect, Circle, Line, Path, TextBox, isGradient } from './engine/Shape'
+  import AIPanel from './AIPanel.svelte'
 
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
@@ -49,6 +50,9 @@
 
   // Clipboard for copy/paste
   let clipboardShape: Shape | null = null
+
+  // AI Panel state
+  let showAIPanel = $state(false)
 
   // Text editing state
   let isEditingText = false
@@ -878,6 +882,12 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // If AI Panel is open, only allow Escape key to close it
+    // All other keyboard events should be ignored to allow text editing
+    if (showAIPanel && e.key !== 'Escape') {
+      return
+    }
+
     // Delete: Delete or Backspace key to delete selected shape
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText) {
       e.preventDefault()
@@ -941,9 +951,19 @@
       return
     }
 
-    // ESC to cancel path drawing or exit path editing
+    // Toggle AI Panel: G (without modifiers, and only when panel is closed)
+    if (e.key === 'g' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !isEditingText && !isEditingPath && !showAIPanel) {
+      e.preventDefault()
+      showAIPanel = !showAIPanel
+      return
+    }
+
+    // ESC to cancel path drawing, exit path editing, or close AI panel
     if (e.key === 'Escape') {
-      if (currentTool === 'path') {
+      if (showAIPanel) {
+        e.preventDefault()
+        showAIPanel = false
+      } else if (currentTool === 'path') {
         toolManager.cancelDrawing()
         renderer.setPreview(null)
       } else if (isEditingPath) {
@@ -1491,11 +1511,27 @@
     return undefined
   }
 
-  function loadSVG(svgString: string) {
+  // Handle AI-generated SVG
+  function handleAIGenerate(svgCode: string) {
+    if (!svgCode) return
+
+    try {
+      loadSVG(svgCode, false) // Don't clear existing shapes - add AI-generated content
+      showAIPanel = false
+      setDirty(true) // Mark as dirty since we added new content
+    } catch (error) {
+      console.error('Failed to load AI-generated SVG:', error)
+      alert('AI生成されたSVGの読み込みに失敗しました')
+    }
+  }
+
+  function loadSVG(svgString: string, clearFirst: boolean = true) {
     if (!renderer) return
 
-    // Clear existing shapes before loading new file
-    clearCanvas()
+    // Clear existing shapes before loading new file (optional)
+    if (clearFirst) {
+      clearCanvas()
+    }
 
     const parser = new DOMParser()
     const doc = parser.parseFromString(svgString, 'image/svg+xml')
@@ -1616,6 +1652,92 @@
         renderer.addShape(shape)
       } catch (err) {
         console.error('Error parsing path element:', err, path)
+      }
+    })
+
+    // Parse polygon elements (convert to Path)
+    const polygons = svg.querySelectorAll('polygon')
+    polygons.forEach((polygon) => {
+      try {
+        const pointsAttr = polygon.getAttribute('points') || ''
+        if (!pointsAttr.trim()) return
+
+        // Convert points to path data
+        const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
+        if (coords.length < 6) return // Need at least 3 points (6 numbers)
+
+        let d = `M ${coords[0]} ${coords[1]}`
+        for (let i = 2; i < coords.length; i += 2) {
+          d += ` L ${coords[i]} ${coords[i + 1]}`
+        }
+        d += ' Z' // Close the polygon
+
+        const stroke = polygon.getAttribute('stroke') || '#333'
+        const strokeWidth = parseFloat(polygon.getAttribute('stroke-width') || '2')
+        const fillAttr = polygon.getAttribute('fill')
+        const fill = fillAttr === 'none' ? undefined : (parseFill(fillAttr, gradients) || '#4CAF50')
+        const rotation = parseRotation(polygon)
+
+        const points = parsePathData(d)
+
+        const shape = new Path({
+          id: `polygon-${Date.now()}-${Math.random()}`,
+          x: 0,
+          y: 0,
+          d,
+          points,
+          closed: true,
+          stroke,
+          strokeWidth,
+          fill,
+          rotation
+        })
+        renderer.addShape(shape)
+      } catch (err) {
+        console.error('Error parsing polygon element:', err, polygon)
+      }
+    })
+
+    // Parse polyline elements (convert to Path)
+    const polylines = svg.querySelectorAll('polyline')
+    polylines.forEach((polyline) => {
+      try {
+        const pointsAttr = polyline.getAttribute('points') || ''
+        if (!pointsAttr.trim()) return
+
+        // Convert points to path data
+        const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
+        if (coords.length < 4) return // Need at least 2 points (4 numbers)
+
+        let d = `M ${coords[0]} ${coords[1]}`
+        for (let i = 2; i < coords.length; i += 2) {
+          d += ` L ${coords[i]} ${coords[i + 1]}`
+        }
+        // Don't close polyline (no Z command)
+
+        const stroke = polyline.getAttribute('stroke') || '#333'
+        const strokeWidth = parseFloat(polyline.getAttribute('stroke-width') || '2')
+        const fillAttr = polyline.getAttribute('fill')
+        const fill = fillAttr === 'none' ? undefined : parseFill(fillAttr, gradients)
+        const rotation = parseRotation(polyline)
+
+        const points = parsePathData(d)
+
+        const shape = new Path({
+          id: `polyline-${Date.now()}-${Math.random()}`,
+          x: 0,
+          y: 0,
+          d,
+          points,
+          closed: false,
+          stroke,
+          strokeWidth,
+          fill,
+          rotation
+        })
+        renderer.addShape(shape)
+      } catch (err) {
+        console.error('Error parsing polyline element:', err, polyline)
       }
     })
 
@@ -2188,6 +2310,14 @@
           <span class="icon">📝</span>
           <span class="label">Text</span>
         </button>
+        <button
+          class:active={showAIPanel}
+          onclick={() => showAIPanel = !showAIPanel}
+          title="AI生成 (G)"
+        >
+          <span class="icon">🤖</span>
+          <span class="label">AI生成</span>
+        </button>
       </div>
     </aside>
 
@@ -2206,6 +2336,16 @@
         ondblclick={handleDblClick}
       ></canvas>
     </main>
+
+    <!-- AI Panel Overlay -->
+    {#if showAIPanel}
+      <div class="ai-panel-overlay">
+        <AIPanel
+          onApply={handleAIGenerate}
+          onClose={() => showAIPanel = false}
+        />
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -2521,5 +2661,24 @@
     cursor: crosshair;
     margin: 0;
     display: block;
+  }
+
+  .ai-panel-overlay {
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    z-index: 1000;
+    animation: slideIn 0.2s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 </style>

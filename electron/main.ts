@@ -304,3 +304,18 @@ ipcMain.handle('save-svg-direct', async (_event, svgContent: string, filePath: s
     return { success: false, error: String(error) }
   }
 })
+
+// IPC handler for getting API key from environment variables
+ipcMain.handle('get-api-key', () => {
+  // Try OpenAI first, then fall back to Anthropic
+  const openaiKey = process.env.OPENAI_API_KEY
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+
+  if (openaiKey) {
+    return { provider: 'openai', key: openaiKey }
+  } else if (anthropicKey) {
+    return { provider: 'anthropic', key: anthropicKey }
+  } else {
+    throw new Error('No API key found. Please set OPENAI_API_KEY or ANTHROPIC_API_KEY in environment variables')
+  }
+})
