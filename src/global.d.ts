@@ -6,6 +6,8 @@ interface Window {
     removeAllListeners: (channel: string) => void
   }
   electron?: {
-    getAPIKey: () => Promise<{ provider: 'openai' | 'anthropic'; key: string }>
+    getAPIKey: () => Promise<{ provider: 'openai' | 'anthropic'; key: string }[]>
+    claudeApiRequest: (params: { apiKey: string; prompt: string }) => Promise<{ success: boolean; data?: any; error?: string }>
+    openaiApiRequest: (params: { apiKey: string; prompt: string }) => Promise<{ success: boolean; data?: any; error?: string }>
   }
 }

@@ -307,15 +307,183 @@ ipcMain.handle('save-svg-direct', async (_event, svgContent: string, filePath: s
 
 // IPC handler for getting API key from environment variables
 ipcMain.handle('get-api-key', () => {
-  // Try OpenAI first, then fall back to Anthropic
+  // Return all available API keys
   const openaiKey = process.env.OPENAI_API_KEY
   const anthropicKey = process.env.ANTHROPIC_API_KEY
 
+  const providers: { provider: 'openai' | 'anthropic'; key: string }[] = []
+
   if (openaiKey) {
-    return { provider: 'openai', key: openaiKey }
-  } else if (anthropicKey) {
-    return { provider: 'anthropic', key: anthropicKey }
-  } else {
+    providers.push({ provider: 'openai', key: openaiKey })
+  }
+  if (anthropicKey) {
+    providers.push({ provider: 'anthropic', key: anthropicKey })
+  }
+
+  if (providers.length === 0) {
     throw new Error('No API key found. Please set OPENAI_API_KEY or ANTHROPIC_API_KEY in environment variables')
   }
+
+  return providers
+})
+
+// IPC handler for Claude API requests (avoid CORS in renderer)
+ipcMain.handle('claude-api-request', async (_event, { apiKey, prompt }: { apiKey: string; prompt: string }) => {
+  const API_URL = 'https://api.anthropic.com/v1/messages'
+  const MODEL = 'claude-sonnet-4-5-20250929'
+  const API_VERSION = '2023-06-01'
+
+  const systemPrompt = `あなたはSVGコード生成の専門家です。ユーザーのプロンプトから、完全で有効なSVGコードを生成してください。
+
+重要なルール:
+1. 必ず完全なSVGタグ構造を出力 (<svg>...</svg>)
+2. viewBox属性を適切に設定 (例: viewBox="0 0 400 300")
+3. width="100%" height="100%" を設定して親要素にフィット
+4. ユーザーが指定した色や形状を正確に反映
+5. シンプルで読みやすいコードを生成
+6. コメントや説明文は不要、SVGコードのみ出力
+7. マークダウンのコードブロック(\`\`\`svg)で囲まない、生のSVGコードのみ
+
+出力例:
+<svg viewBox="0 0 400 300" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="50" fill="blue"/>
+  <rect x="200" y="50" width="100" height="100" fill="red"/>
+</svg>`
+
+  const maxRetries = 3
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': API_VERSION
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 4096,
+          temperature: 1.0,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ]
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const status = response.status
+
+        // Retry on 429 (rate limit) or 529 (overloaded)
+        if ((status === 429 || status === 529) && attempt < maxRetries - 1) {
+          const waitTime = Math.pow(2, attempt) * 1000
+          console.warn(`Claude API ${status} error, retrying in ${waitTime}ms...`)
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+          continue
+        }
+
+        throw new Error(`API Error (${status}): ${errorData.error?.message || response.statusText}`)
+      }
+
+      const data = await response.json()
+      return { success: true, data }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      
+      if (attempt < maxRetries - 1) {
+        const waitTime = Math.pow(2, attempt) * 1000
+        console.warn(`Claude API request failed, retrying in ${waitTime}ms...`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+      }
+    }
+  }
+
+  return { success: false, error: lastError?.message || 'Unknown error' }
+})
+
+// IPC handler for OpenAI API requests (avoid CORS in renderer)
+ipcMain.handle('openai-api-request', async (_event, { apiKey, prompt }: { apiKey: string; prompt: string }) => {
+  const API_URL = 'https://api.openai.com/v1/chat/completions'
+  const MODEL = 'gpt-4o'
+
+  const systemPrompt = `あなたはSVGコード生成の専門家です。ユーザーのプロンプトから、完全で有効なSVGコードを生成してください。
+
+重要なルール:
+1. 必ず完全なSVGタグ構造を出力 (<svg>...</svg>)
+2. viewBox属性を適切に設定 (例: viewBox="0 0 400 300")
+3. width="100%" height="100%" を設定して親要素にフィット
+4. ユーザーが指定した色や形状を正確に反映
+5. シンプルで読みやすいコードを生成
+6. コメントや説明文は不要、SVGコードのみ出力
+7. マークダウンのコードブロック(\`\`\`svg)で囲まない、生のSVGコードのみ
+
+出力例:
+<svg viewBox="0 0 400 300" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="50" fill="blue"/>
+  <rect x="200" y="50" width="100" height="100" fill="red"/>
+</svg>`
+
+  const maxRetries = 3
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_completion_tokens: 4096,
+          temperature: 1.0
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const status = response.status
+
+        // Retry on 429, 500, 503
+        if ((status === 429 || status === 500 || status === 503) && attempt < maxRetries - 1) {
+          const waitTime = Math.pow(2, attempt) * 1000
+          console.warn(`OpenAI API ${status} error, retrying in ${waitTime}ms...`)
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+          continue
+        }
+
+        throw new Error(`API Error (${status}): ${errorData.error?.message || response.statusText}`)
+      }
+
+      const data = await response.json()
+      return { success: true, data }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      
+      if (attempt < maxRetries - 1) {
+        const waitTime = Math.pow(2, attempt) * 1000
+        console.warn(`OpenAI API request failed, retrying in ${waitTime}ms...`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+      }
+    }
+  }
+
+  return { success: false, error: lastError?.message || 'Unknown error' }
 })

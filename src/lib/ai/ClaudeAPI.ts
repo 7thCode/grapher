@@ -54,70 +54,19 @@ export class ClaudeAPI {
   <rect x="200" y="50" width="100" height="100" fill="red"/>
 </svg>`
 
-    // Retry logic for transient errors (429, 529)
-    const maxRetries = 3
-    let response: Response | null = null
+    // Use IPC to make request from main process (avoids CORS)
+    const result = await (window as any).electron.claudeApiRequest({
+      apiKey: this.apiKey,
+      prompt: prompt
+    })
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        response = await fetch(this.API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': this.apiKey,
-            'anthropic-version': this.API_VERSION
-          },
-          body: JSON.stringify({
-            model: this.MODEL,
-            max_tokens: 4096,
-            temperature: 1.0,
-            system: systemPrompt,
-            messages: [
-              {
-                role: 'user',
-                content: prompt
-              }
-            ]
-          })
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          const status = response.status
-
-          // Retry on 429 (rate limit) or 529 (overloaded)
-          if ((status === 429 || status === 529) && attempt < maxRetries - 1) {
-            const waitTime = Math.pow(2, attempt) * 1000 // Exponential backoff: 1s, 2s, 4s
-            console.warn(`API ${status} error, retrying in ${waitTime}ms... (attempt ${attempt + 1}/${maxRetries})`)
-            await new Promise(resolve => setTimeout(resolve, waitTime))
-            continue
-          }
-
-          throw new Error(
-            `API Error (${status}): ${errorData.error?.message || response.statusText}`
-          )
-        }
-
-        // Success - break out of retry loop
-        break
-      } catch (error) {
-        if (attempt === maxRetries - 1) {
-          throw error
-        }
-        // Wait before retrying
-        const waitTime = Math.pow(2, attempt) * 1000
-        console.warn(`Request failed, retrying in ${waitTime}ms... (attempt ${attempt + 1}/${maxRetries})`)
-        await new Promise(resolve => setTimeout(resolve, waitTime))
-      }
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to get response from Claude API')
     }
 
-    if (!response) {
-      throw new Error('Failed to get response after retries')
-    }
+    const data = result.data
 
     try {
-      const data = await response.json()
-
       if (!data.content || !data.content[0] || !data.content[0].text) {
         throw new Error('Invalid API response: no content returned')
       }

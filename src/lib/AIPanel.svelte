@@ -6,10 +6,11 @@
 
   interface Props {
     onApply: (svg: string) => void
+    onCopy: (svg: string) => void
     onClose: () => void
   }
 
-  let { onApply, onClose }: Props = $props()
+  let { onApply, onCopy, onClose }: Props = $props()
 
   // State
   let prompt = $state('')
@@ -17,6 +18,8 @@
   let isLoading = $state(false)
   let error = $state<string | null>(null)
   let lastGenerateTime = $state(0)
+  let availableProviders = $state<{ provider: 'openai' | 'anthropic'; key: string }[]>([])
+  let selectedProvider = $state<'openai' | 'anthropic' | null>(null)
 
   // Rate limiting: max 5 requests per minute
   const RATE_LIMIT_MS = 12000 // 12 seconds between requests
@@ -32,6 +35,24 @@
     return now - lastGenerateTime >= RATE_LIMIT_MS
   })
 
+  // Load available providers on mount
+  $effect(() => {
+    async function loadProviders() {
+      try {
+        const providers = await (window as any).electron.getAPIKey()
+        availableProviders = providers
+        // Select first available provider by default
+        if (providers.length > 0 && !selectedProvider) {
+          selectedProvider = providers[0].provider
+        }
+      } catch (err) {
+        console.error('Failed to load providers:', err)
+        error = 'APIキーの取得に失敗しました'
+      }
+    }
+    loadProviders()
+  })
+
   async function handleGenerate() {
     if (!isPromptValid) return
 
@@ -42,25 +63,30 @@
       return
     }
 
+    if (!selectedProvider) {
+      error = 'LLMプロバイダーを選択してください'
+      return
+    }
+
     isLoading = true
     error = null
     generatedResult = null
     lastGenerateTime = Date.now()
 
     try {
-      // Get API key from Electron main process via IPC
-      const apiConfig = await (window as any).electron.getAPIKey()
+      // Find the selected provider's API key
+      const providerConfig = availableProviders.find(p => p.provider === selectedProvider)
 
-      if (!apiConfig || !apiConfig.key) {
-        throw new Error('APIキーが設定されていません。環境変数OPENAI_API_KEYまたはANTHROPIC_API_KEYを設定してください。')
+      if (!providerConfig) {
+        throw new Error('選択されたプロバイダーのAPIキーが見つかりません')
       }
 
-      // Use the appropriate API based on the provider
-      if (apiConfig.provider === 'openai') {
-        const api = new OpenAIAPI(apiConfig.key)
+      // Use the appropriate API based on the selected provider
+      if (selectedProvider === 'openai') {
+        const api = new OpenAIAPI(providerConfig.key)
         generatedResult = await api.generateSVG(prompt)
       } else {
-        const api = new ClaudeAPI(apiConfig.key)
+        const api = new ClaudeAPI(providerConfig.key)
         generatedResult = await api.generateSVG(prompt)
       }
     } catch (err) {
@@ -79,6 +105,15 @@
     if (generatedResult && generatedResult.svg) {
       onApply(generatedResult.svg)
       handleClear()
+    }
+  }
+
+  function handleCopy() {
+    if (generatedResult && generatedResult.svg) {
+      onCopy(generatedResult.svg)
+      // Don't clear - allow multiple copies
+      // Close the panel after copying
+      onClose()
     }
   }
 
@@ -106,6 +141,20 @@
   </div>
 
   <div class="content">
+    <!-- LLM Provider Selection -->
+    {#if availableProviders.length > 1}
+      <div class="provider-section">
+        <label for="provider-select">LLMプロバイダー:</label>
+        <select id="provider-select" bind:value={selectedProvider}>
+          {#each availableProviders as provider}
+            <option value={provider.provider}>
+              {provider.provider === 'openai' ? 'OpenAI GPT-4o' : 'Claude Sonnet 4.5'}
+            </option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+
     <!-- Prompt Input -->
     <div class="input-section">
       <label for="prompt-input">
@@ -169,6 +218,9 @@
         <div class="button-row">
           <button class="apply-button" onclick={handleApply}>
             ✓ 適用
+          </button>
+          <button class="copy-button" onclick={handleCopy} title="クリップボードにコピーして、Cmd+Vで貼り付け">
+            📋 コピー
           </button>
           <button class="regenerate-button" onclick={handleGenerate}>
             🔄 再生成
@@ -245,6 +297,41 @@
     padding: 16px;
     overflow-y: auto;
     flex: 1;
+  }
+
+  .provider-section {
+    margin-bottom: 16px;
+  }
+
+  .provider-section label {
+    display: block;
+    margin-bottom: 8px;
+    color: #ccc;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .provider-section select {
+    width: 100%;
+    padding: 10px 12px;
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+
+  .provider-section select:focus {
+    outline: none;
+    border-color: #2196F3;
+  }
+
+  .provider-section select option {
+    background: #1e1e1e;
+    color: #fff;
   }
 
   .input-section {
@@ -336,6 +423,17 @@
     background: #388E3C;
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
+  }
+
+  .copy-button {
+    background: #2196F3;
+    color: white;
+  }
+
+  .copy-button:hover {
+    background: #1976D2;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
   }
 
   .regenerate-button {

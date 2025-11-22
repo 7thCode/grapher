@@ -5,7 +5,7 @@
   import type { HandleType } from './engine/TransformControls'
   import { saveSVGFile } from './utils/electron'
   import type { Shape, LinearGradient, GradientStop, PathPoint } from './engine/Shape'
-  import { Rect, Circle, Line, Path, TextBox, isGradient } from './engine/Shape'
+  import { Rect, Circle, Line, Path, TextBox, Group, isGradient } from './engine/Shape'
   import AIPanel from './AIPanel.svelte'
 
   let canvas: HTMLCanvasElement
@@ -1095,9 +1095,30 @@
 
   function copyShape() {
     if (!renderer) return
-    const selected = renderer.getSelectedShape()
-    if (selected) {
-      clipboardShape = selected
+    
+    const selectedIds = renderer.getSelectedIds()
+    if (selectedIds.length === 0) return
+
+    if (selectedIds.length === 1) {
+      // Single shape - copy it directly
+      const selected = renderer.getSelectedShape()
+      if (selected) {
+        clipboardShape = selected
+      }
+    } else {
+      // Multiple shapes - group them
+      const shapes = renderer.getShapes()
+      const selectedShapes = shapes.filter(s => selectedIds.includes(s.props.id))
+      
+      const group = new Group({
+        id: `clipboard-group-${Date.now()}`,
+        x: 0,
+        y: 0,
+        children: selectedShapes
+      })
+      
+      clipboardShape = group
+      console.log('Copied multiple shapes as group:', selectedShapes.length, 'shapes')
     }
   }
 
@@ -1142,6 +1163,60 @@
         x: clipboardShape.props.x + offset,
         y: clipboardShape.props.y + offset,
         d: clipboardShape.props.d
+      })
+    } else if (clipboardShape instanceof Group) {
+      // Clone the group with all its shapes
+      const clonedShapes = clipboardShape.props.children.map((shape) => {
+        if (shape instanceof Rect) {
+          return new Rect({
+            ...shape.props,
+            id: `rect-${Date.now()}-${Math.random()}`,
+            x: shape.props.x + offset,
+            y: shape.props.y + offset
+          })
+        } else if (shape instanceof Circle) {
+          return new Circle({
+            ...shape.props,
+            id: `circle-${Date.now()}-${Math.random()}`,
+            cx: shape.props.cx + offset,
+            cy: shape.props.cy + offset,
+            x: shape.props.x + offset,
+            y: shape.props.y + offset
+          })
+        } else if (shape instanceof Path) {
+          return new Path({
+            ...shape.props,
+            id: `path-${Date.now()}-${Math.random()}`,
+            x: shape.props.x + offset,
+            y: shape.props.y + offset
+          })
+        } else if (shape instanceof Line) {
+          return new Line({
+            ...shape.props,
+            id: `line-${Date.now()}-${Math.random()}`,
+            x: shape.props.x + offset,
+            y: shape.props.y + offset,
+            x1: shape.props.x1 + offset,
+            y1: shape.props.y1 + offset,
+            x2: shape.props.x2 + offset,
+            y2: shape.props.y2 + offset
+          })
+        } else if (shape instanceof TextBox) {
+          return new TextBox({
+            ...shape.props,
+            id: `text-${Date.now()}-${Math.random()}`,
+            x: shape.props.x + offset,
+            y: shape.props.y + offset
+          })
+        }
+        return shape
+      })
+
+      newShape = new Group({
+        id: `group-${Date.now()}`,
+        x: 0,
+        y: 0,
+        children: clonedShapes
       })
     } else {
       return
@@ -1511,17 +1586,156 @@
     return undefined
   }
 
-  // Handle AI-generated SVG
+  /**
+   * Parse SVG code and return array of Shape objects
+   */
+  function parseSVGToShapes(svgCode: string): Shape[] {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(svgCode, 'image/svg+xml')
+    const svg = doc.querySelector('svg')
+    if (!svg) {
+      throw new Error('Invalid SVG')
+    }
+
+    const shapes: Shape[] = []
+    const baseTimestamp = Date.now()
+    let shapeCounter = 0
+    const generateId = (type: string) => `${type}-${baseTimestamp}-${shapeCounter++}`
+    const gradients = parseGradients(svg)
+
+    // Parse Rects
+    svg.querySelectorAll('rect').forEach((rect) => {
+      const x = parseFloat(rect.getAttribute('x') || '0')
+      const y = parseFloat(rect.getAttribute('y') || '0')
+      const width = parseFloat(rect.getAttribute('width') || '0')
+      const height = parseFloat(rect.getAttribute('height') || '0')
+      const fill = parseFill(rect.getAttribute('fill'), gradients) || '#4CAF50'
+      const stroke = rect.getAttribute('stroke') || undefined
+      const strokeWidth = parseFloat(rect.getAttribute('stroke-width') || '1')
+      const rotation = parseRotation(rect)
+      shapes.push(new Rect({ id: generateId('rect'), x, y, width, height, fill, stroke, strokeWidth, rotation }))
+    })
+
+    // Parse Circles
+    svg.querySelectorAll('circle').forEach((circle) => {
+      const cx = parseFloat(circle.getAttribute('cx') || '0')
+      const cy = parseFloat(circle.getAttribute('cy') || '0')
+      const r = parseFloat(circle.getAttribute('r') || '0')
+      const fill = parseFill(circle.getAttribute('fill'), gradients) || '#4CAF50'
+      const stroke = circle.getAttribute('stroke') || undefined
+      const strokeWidth = parseFloat(circle.getAttribute('stroke-width') || '1')
+      const rotation = parseRotation(circle)
+      shapes.push(new Circle({ id: generateId('circle'), x: cx - r, y: cy - r, cx, cy, r, fill, stroke, strokeWidth, rotation }))
+    })
+
+    // Parse Ellipses (convert to Path)
+    svg.querySelectorAll('ellipse').forEach((ellipse) => {
+      const cx = parseFloat(ellipse.getAttribute('cx') || '0')
+      const cy = parseFloat(ellipse.getAttribute('cy') || '0')
+      const rx = parseFloat(ellipse.getAttribute('rx') || '0')
+      const ry = parseFloat(ellipse.getAttribute('ry') || '0')
+      if (rx === 0 || ry === 0) return
+      const d = `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`
+      const fill = parseFill(ellipse.getAttribute('fill'), gradients) || '#4CAF50'
+      const stroke = ellipse.getAttribute('stroke') || undefined
+      const strokeWidth = parseFloat(ellipse.getAttribute('stroke-width') || '1')
+      const rotation = parseRotation(ellipse)
+      const points = parsePathData(d)
+      shapes.push(new Path({ id: generateId('ellipse'), x: 0, y: 0, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
+    })
+
+    // Parse Paths
+    svg.querySelectorAll('path').forEach((path) => {
+      const d = path.getAttribute('d') || ''
+      const stroke = path.getAttribute('stroke') || '#333'
+      const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
+      const fillAttr = path.getAttribute('fill')
+      const fill = fillAttr === 'none' ? undefined : parseFill(fillAttr, gradients)
+      const rotation = parseRotation(path)
+      const points = parsePathData(d)
+      const closed = d.trim().toUpperCase().endsWith('Z')
+      shapes.push(new Path({ id: generateId('path'), x: 0, y: 0, d, points, closed, stroke, strokeWidth, fill, rotation }))
+    })
+
+    // Parse Polygons
+    svg.querySelectorAll('polygon').forEach((polygon) => {
+      const pointsAttr = polygon.getAttribute('points') || ''
+      if (!pointsAttr.trim()) return
+      const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
+      if (coords.length < 6) return
+      let d = `M ${coords[0]} ${coords[1]}`
+      for (let i = 2; i < coords.length; i += 2) d += ` L ${coords[i]} ${coords[i + 1]}`
+      d += ' Z'
+      const fill = parseFill(polygon.getAttribute('fill'), gradients) || '#4CAF50'
+      const stroke = polygon.getAttribute('stroke') || '#333'
+      const strokeWidth = parseFloat(polygon.getAttribute('stroke-width') || '2')
+      const rotation = parseRotation(polygon)
+      const points = parsePathData(d)
+      shapes.push(new Path({ id: generateId('polygon'), x: 0, y: 0, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
+    })
+
+    return shapes
+  }
+
+  // Handle AI-generated SVG - group all shapes together
   function handleAIGenerate(svgCode: string) {
-    if (!svgCode) return
+    if (!svgCode || !renderer) return
 
     try {
-      loadSVG(svgCode, false) // Don't clear existing shapes - add AI-generated content
+      const shapes = parseSVGToShapes(svgCode)
+      
+      if (shapes.length === 0) {
+        alert('有効なシェイプが見つかりませんでした')
+        return
+      }
+
+      // Group all AI-generated shapes together
+      const groupId = `ai-group-${Date.now()}`
+      const group = new Group({
+        id: groupId,
+        x: 0,
+        y: 0,
+        children: shapes
+      })
+
+      renderer.addShape(group)
+      renderer.selectShape(groupId)
+      hasSelection = true
+      updateSelectionState()
+      
       showAIPanel = false
-      setDirty(true) // Mark as dirty since we added new content
+      setDirty(true)
     } catch (error) {
       console.error('Failed to load AI-generated SVG:', error)
       alert('AI生成されたSVGの読み込みに失敗しました')
+    }
+  }
+
+  function handleAICopy(svgCode: string) {
+    if (!svgCode || !renderer) return
+
+    try {
+      const shapes = parseSVGToShapes(svgCode)
+      
+      if (shapes.length === 0) {
+        alert('有効なシェイプが見つかりませんでした')
+        return
+      }
+
+      // Group all shapes together for clipboard
+      const group = new Group({
+        id: `clipboard-group-${Date.now()}`,
+        x: 0,
+        y: 0,
+        children: shapes
+      })
+
+      clipboardShape = group
+      showAIPanel = false
+      console.log('Copied AI-generated group to clipboard:', shapes.length, 'shapes')
+    } catch (error) {
+      console.error('Failed to copy AI-generated SVG:', error)
+      alert('コピーに失敗しました')
     }
   }
 
@@ -1541,6 +1755,11 @@
       return
     }
 
+    // Generate unique IDs for shapes using timestamp and counter
+    const baseTimestamp = Date.now()
+    let shapeCounter = 0
+    const generateId = (type: string) => `${type}-${baseTimestamp}-${shapeCounter++}`
+
     // Parse gradient definitions first
     const gradients = parseGradients(svg)
 
@@ -1557,7 +1776,7 @@
       const rotation = parseRotation(rect)
 
       const shape = new Rect({
-        id: `rect-${Date.now()}-${Math.random()}`,
+        id: generateId('rect'),
         x,
         y,
         width,
@@ -1582,7 +1801,7 @@
       const rotation = parseRotation(circle)
 
       const shape = new Circle({
-        id: `circle-${Date.now()}-${Math.random()}`,
+        id: generateId('circle'),
         x: cx - r,
         y: cy - r,
         cx,
@@ -1594,6 +1813,46 @@
         rotation
       })
       renderer.addShape(shape)
+    })
+
+    // Parse ellipse elements (convert to Path)
+    const ellipses = svg.querySelectorAll('ellipse')
+    ellipses.forEach((ellipse) => {
+      try {
+        const cx = parseFloat(ellipse.getAttribute('cx') || '0')
+        const cy = parseFloat(ellipse.getAttribute('cy') || '0')
+        const rx = parseFloat(ellipse.getAttribute('rx') || '0')
+        const ry = parseFloat(ellipse.getAttribute('ry') || '0')
+
+        if (rx === 0 || ry === 0) return
+
+        // Convert ellipse to path data using arc commands
+        const d = `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`
+
+        const fillAttr = ellipse.getAttribute('fill')
+        const fill = fillAttr === 'none' ? undefined : (parseFill(fillAttr, gradients) || '#4CAF50')
+        const stroke = ellipse.getAttribute('stroke') || undefined
+        const strokeWidth = parseFloat(ellipse.getAttribute('stroke-width') || '1')
+        const rotation = parseRotation(ellipse)
+
+        const points = parsePathData(d)
+
+        const shape = new Path({
+          id: generateId('ellipse'),
+          x: 0,
+          y: 0,
+          d,
+          points,
+          closed: true,
+          stroke,
+          strokeWidth,
+          fill,
+          rotation
+        })
+        renderer.addShape(shape)
+      } catch (err) {
+        console.error('Error parsing ellipse element:', err, ellipse)
+      }
     })
 
     // Parse line elements
@@ -1608,7 +1867,7 @@
       const rotation = parseRotation(line)
 
       const shape = new Line({
-        id: `line-${Date.now()}-${Math.random()}`,
+        id: generateId('line'),
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         x1,
@@ -1638,7 +1897,7 @@
         const closed = d.trim().toUpperCase().endsWith('Z')
 
         const shape = new Path({
-          id: `path-${Date.now()}-${Math.random()}`,
+          id: generateId('path'),
           x: 0,
           y: 0,
           d,
@@ -1681,7 +1940,7 @@
         const points = parsePathData(d)
 
         const shape = new Path({
-          id: `polygon-${Date.now()}-${Math.random()}`,
+          id: generateId('polygon'),
           x: 0,
           y: 0,
           d,
@@ -1724,7 +1983,7 @@
         const points = parsePathData(d)
 
         const shape = new Path({
-          id: `polyline-${Date.now()}-${Math.random()}`,
+          id: generateId('polyline'),
           x: 0,
           y: 0,
           d,
@@ -1777,7 +2036,7 @@
       const lineHeight = lineHeightMatch ? parseFloat(lineHeightMatch[1]) : 1.2
 
       const shape = new TextBox({
-        id: `text-${Date.now()}-${Math.random()}`,
+        id: generateId('text'),
         x,
         y,
         width,
@@ -2342,6 +2601,7 @@
       <div class="ai-panel-overlay">
         <AIPanel
           onApply={handleAIGenerate}
+          onCopy={handleAICopy}
           onClose={() => showAIPanel = false}
         />
       </div>
