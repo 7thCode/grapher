@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 // Expose AI-related APIs
 contextBridge.exposeInMainWorld('electron', {
   getAPIKey: () => ipcRenderer.invoke('get-api-key'),
+  setApiKey: (params: { provider: 'openai' | 'anthropic'; key: string }) => ipcRenderer.invoke('set-api-key', params),
+  deleteApiKey: (provider: 'openai' | 'anthropic') => ipcRenderer.invoke('delete-api-key', provider),
   claudeApiRequest: (params: { apiKey: string; prompt: string }) => ipcRenderer.invoke('claude-api-request', params),
   openaiApiRequest: (params: { apiKey: string; prompt: string }) => ipcRenderer.invoke('openai-api-request', params)
 })

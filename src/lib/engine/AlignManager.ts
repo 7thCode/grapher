@@ -171,8 +171,14 @@ export class AlignManager {
       if (x !== null) shape.props.x += dx
       if (y !== null) shape.props.y += dy
     } else if (shape instanceof Circle) {
-      if (x !== null) shape.props.cx += dx
-      if (y !== null) shape.props.cy += dy
+      if (x !== null) {
+        shape.props.cx += dx
+        shape.props.x += dx
+      }
+      if (y !== null) {
+        shape.props.cy += dy
+        shape.props.y += dy
+      }
     } else if (shape instanceof Line) {
       if (x !== null) {
         shape.props.x1 += dx

@@ -84,6 +84,9 @@ export class Renderer {
     } else if (shape instanceof Circle) {
       shape.props.cx += dx
       shape.props.cy += dy
+      // Also update x, y to keep them in sync
+      shape.props.x += dx
+      shape.props.y += dy
     } else if (shape instanceof Line) {
       shape.props.x1 += dx
       shape.props.y1 += dy

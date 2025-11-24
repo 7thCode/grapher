@@ -8,9 +8,10 @@
     onApply: (svg: string) => void
     onCopy: (svg: string) => void
     onClose: () => void
+    normalizeSVG: (svg: string) => string
   }
 
-  let { onApply, onCopy, onClose }: Props = $props()
+  let { onApply, onCopy, onClose, normalizeSVG }: Props = $props()
 
   // State
   let prompt = $state('')
@@ -28,6 +29,17 @@
   // Character count
   const promptLength = $derived(prompt.length)
   const isPromptValid = $derived(prompt.trim().length > 0 && promptLength <= MAX_PROMPT_LENGTH)
+
+  // Normalized SVG for preview (applies viewBox transformations)
+  const normalizedSvg = $derived.by(() => {
+    if (!generatedResult || !generatedResult.svg) return null
+    try {
+      return normalizeSVG(generatedResult.svg)
+    } catch (err) {
+      console.error('Failed to normalize SVG for preview:', err)
+      return generatedResult.svg // Fallback to original
+    }
+  })
 
   // Rate limit check
   const canGenerate = $derived(() => {
@@ -213,7 +225,7 @@
       <div class="preview">
         <div class="preview-label">プレビュー:</div>
         <div class="svg-preview">
-          {@html generatedResult.svg}
+          {@html normalizedSvg}
         </div>
         <div class="button-row">
           <button class="apply-button" onclick={handleApply}>

@@ -209,7 +209,12 @@ export class TransformControls {
     const delta = Math.sqrt(dx * dx + dy * dy)
     const direction = handleType.includes('e') || handleType.includes('s') ? 1 : -1
 
-    circle.props.r = Math.max(5, r + delta * direction * 0.5)
+    const newR = Math.max(5, r + delta * direction * 0.5)
+    circle.props.r = newR
+    
+    // Update x, y to keep them in sync with cx, cy, r
+    circle.props.x = cx - newR
+    circle.props.y = cy - newR
   }
 
   private resizeLine(handleType: HandleType, dx: number, dy: number) {
@@ -563,7 +568,11 @@ export class TransformControls {
         const relY = child.props.cy - originY
         child.props.cx = originX + relX * scaleX
         child.props.cy = originY + relY * scaleY
-        child.props.r *= Math.min(scaleX, scaleY)
+        const newR = child.props.r * Math.min(scaleX, scaleY)
+        child.props.r = newR
+        // Update x, y to keep them in sync
+        child.props.x = child.props.cx - newR
+        child.props.y = child.props.cy - newR
       } else if (child instanceof Line) {
         // Scale line
         const relX1 = child.props.x1 - originX

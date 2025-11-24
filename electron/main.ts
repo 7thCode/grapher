@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
+import Store from 'electron-store'
 
 // ESM compatibility
 const __filename = fileURLToPath(import.meta.url)
@@ -12,6 +13,34 @@ process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged
   ? process.env.DIST
   : path.join(process.env.DIST, '../public')
+
+// API Key storage schema
+interface StoreSchema {
+  openaiApiKey?: string
+  anthropicApiKey?: string
+}
+
+// Initialize electron-store for persisting API keys
+const store = new Store<StoreSchema>({
+  name: 'config',
+  defaults: {
+    openaiApiKey: undefined,
+    anthropicApiKey: undefined
+  }
+})
+
+// Initialize API keys from environment variables if not set
+function initializeAPIKeys() {
+  // Load from environment variables on first run or if not set
+  if (!store.get('openaiApiKey') && process.env.OPENAI_API_KEY) {
+    store.set('openaiApiKey', process.env.OPENAI_API_KEY)
+    console.log('Initialized OpenAI API key from environment variable')
+  }
+  if (!store.get('anthropicApiKey') && process.env.ANTHROPIC_API_KEY) {
+    store.set('anthropicApiKey', process.env.ANTHROPIC_API_KEY)
+    console.log('Initialized Anthropic API key from environment variable')
+  }
+}
 
 let win: BrowserWindow | null
 let pendingClose = false
@@ -221,6 +250,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Initialize API keys from environment variables
+  initializeAPIKeys()
+  
   createMenu()
   createWindow()
 })
@@ -305,11 +337,11 @@ ipcMain.handle('save-svg-direct', async (_event, svgContent: string, filePath: s
   }
 })
 
-// IPC handler for getting API key from environment variables
+// IPC handler for getting API keys from storage
 ipcMain.handle('get-api-key', () => {
-  // Return all available API keys
-  const openaiKey = process.env.OPENAI_API_KEY
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  // Return all available API keys from storage
+  const openaiKey = store.get('openaiApiKey')
+  const anthropicKey = store.get('anthropicApiKey')
 
   const providers: { provider: 'openai' | 'anthropic'; key: string }[] = []
 
@@ -321,10 +353,30 @@ ipcMain.handle('get-api-key', () => {
   }
 
   if (providers.length === 0) {
-    throw new Error('No API key found. Please set OPENAI_API_KEY or ANTHROPIC_API_KEY in environment variables')
+    throw new Error('No API key found. Please set API keys in Settings')
   }
 
   return providers
+})
+
+// IPC handler for setting API keys
+ipcMain.handle('set-api-key', (_event, { provider, key }: { provider: 'openai' | 'anthropic'; key: string }) => {
+  if (provider === 'openai') {
+    store.set('openaiApiKey', key)
+  } else if (provider === 'anthropic') {
+    store.set('anthropicApiKey', key)
+  }
+  return { success: true }
+})
+
+// IPC handler for deleting API key
+ipcMain.handle('delete-api-key', (_event, provider: 'openai' | 'anthropic') => {
+  if (provider === 'openai') {
+    store.delete('openaiApiKey')
+  } else if (provider === 'anthropic') {
+    store.delete('anthropicApiKey')
+  }
+  return { success: true }
 })
 
 // IPC handler for Claude API requests (avoid CORS in renderer)

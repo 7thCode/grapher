@@ -35,7 +35,10 @@
       "mcp__serena__replace_regex",
       "mcp__serena__think_about_whether_you_are_done",
       "Bash(npm run package:mac:*)",
-      "mcp__serena__insert_before_symbol"
+      "mcp__serena__insert_before_symbol",
+      "mcp__serena__replace_content",
+      "Bash(npm install:*)",
+      "mcp__serena__create_text_file"
     ],
     "deny": [],
     "ask": []

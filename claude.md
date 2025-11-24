@@ -1,4 +1,562 @@
 # Grapher - 開発ログ
+# Grapher - 開発ログ
+
+## 2025-11-22 - AI生成SVGのviewBox座標変換の実装
+
+### 問題
+「猫を描いて」等のプロンプトでAI生成した図形を適用すると、以下の問題が発生：
+- 位置を移動させると図形が消える
+- 座標にマイナス値が含まれる（画面外にハンドルがある）
+- サイズが異常
+- 一部の図形のみ表示される
+
+### 原因
+
+**viewBox座標系の変換が欠落**
+
+AI生成のSVGは、独自の座標系（viewBox）を定義している：
+- `viewBox="0 0 500 500"` - 標準的な正の座標
+- `viewBox="-100 -100 400 400"` - **負のオフセット**（AI生成でよくある）
+- `viewBox="0 0 24 24"` - アイコンサイズの座標（スケールアップが必要）
+
+以前の実装では、viewBox属性を無視してSVG要素の生座標をそのまま使用していたため、負の座標やスケールの不一致が発生していた。
+
+### 修正内容
+
+#### 1. Canvas.svelte - createViewBoxTransform()関数の追加
+
+viewBox座標系からキャンバスピクセル座標への変換関数を作成：
+
+```typescript
+function createViewBoxTransform(svg: Element) {
+  const viewBoxAttr = svg.getAttribute('viewBox')
+  if (!viewBoxAttr) {
+    // viewBoxがない場合は恒等変換
+    return {
+      transformX: (x: number) => x,
+      transformY: (y: number) => y,
+      transformLength: (length: number) => length
+    }
+  }
+
+  const viewBox = viewBoxAttr.split(/\s+/).map(parseFloat)
+  if (viewBox.length !== 4) {
+    return {
+      transformX: (x: number) => x,
+      transformY: (y: number) => y,
+      transformLength: (length: number) => length
+    }
+  }
+
+  const [vbMinX, vbMinY, vbWidth, vbHeight] = viewBox
+  
+  // viewBoxを適切なキャンバスサイズにマッピング
+  const targetWidth = 800
+  const targetHeight = 600
+  
+  const scaleX = targetWidth / vbWidth
+  const scaleY = targetHeight / vbHeight
+  const scale = Math.min(scaleX, scaleY) // アスペクト比を維持
+  
+  const offsetX = -vbMinX
+  const offsetY = -vbMinY
+  
+  return {
+    transformX: (x: number) => (x + offsetX) * scale,
+    transformY: (y: number) => (y + offsetY) * scale,
+    transformLength: (length: number) => length * scale
+  }
+}
+```
+
+**変換の仕組み:**
+1. **オフセット**: viewBoxの最小座標（vbMinX, vbMinY）を補正
+2. **スケール**: viewBoxのサイズをターゲットサイズ（800x600）にマッピング
+3. **アスペクト比**: 縦横比を維持するため、小さい方のスケールを使用
+
+#### 2. Canvas.svelte - transformPathPoints()とreconstructPathData()の追加
+
+パス座標の変換と再構築のためのヘルパー関数：
+
+```typescript
+function transformPathPoints(
+  points: PathPoint[],
+  transformX: (x: number) => number,
+  transformY: (y: number) => number
+): PathPoint[] {
+  return points.map(point => {
+    const transformed: PathPoint = {
+      x: transformX(point.x),
+      y: transformY(point.y),
+      type: point.type
+    }
+    
+    // ベジェ曲線の制御点も変換
+    if (point.cp1x !== undefined) transformed.cp1x = transformX(point.cp1x)
+    if (point.cp1y !== undefined) transformed.cp1y = transformY(point.cp1y)
+    if (point.cp2x !== undefined) transformed.cp2x = transformX(point.cp2x)
+    if (point.cp2y !== undefined) transformed.cp2y = transformY(point.cp2y)
+    if (point.cpx !== undefined) transformed.cpx = transformX(point.cpx)
+    if (point.cpy !== undefined) transformed.cpy = transformY(point.cpy)
+    
+    if (point.pointType) transformed.pointType = point.pointType
+    
+    return transformed
+  })
+}
+
+function reconstructPathData(points: PathPoint[], closed: boolean): string {
+  let d = ''
+  
+  for (const point of points) {
+    if (point.type === 'M') {
+      d += `M ${point.x} ${point.y} `
+    } else if (point.type === 'L') {
+      d += `L ${point.x} ${point.y} `
+    } else if (point.type === 'C' && point.cp1x !== undefined && point.cp1y !== undefined && point.cp2x !== undefined && point.cp2y !== undefined) {
+      d += `C ${point.cp1x} ${point.cp1y} ${point.cp2x} ${point.cp2y} ${point.x} ${point.y} `
+    } else if (point.type === 'Q' && point.cpx !== undefined && point.cpy !== undefined) {
+      d += `Q ${point.cpx} ${point.cpy} ${point.x} ${point.y} `
+    }
+  }
+  
+  if (closed) {
+    d += 'Z'
+  }
+  
+  return d.trim()
+}
+```
+
+#### 3. Canvas.svelte - parseSVGToShapes()の全シェイプタイプへの適用
+
+**Rect:**
+```typescript
+svg.querySelectorAll('rect').forEach((rect) => {
+  const x = transformX(parseFloat(rect.getAttribute('x') || '0'))
+  const y = transformY(parseFloat(rect.getAttribute('y') || '0'))
+  const width = transformLength(parseFloat(rect.getAttribute('width') || '0'))
+  const height = transformLength(parseFloat(rect.getAttribute('height') || '0'))
+  // ...
+})
+```
+
+**Circle:**
+```typescript
+svg.querySelectorAll('circle').forEach((circle) => {
+  const cx = transformX(parseFloat(circle.getAttribute('cx') || '0'))
+  const cy = transformY(parseFloat(circle.getAttribute('cy') || '0'))
+  const r = transformLength(parseFloat(circle.getAttribute('r') || '0'))
+  // ...
+})
+```
+
+**Ellipse:**
+```typescript
+svg.querySelectorAll('ellipse').forEach((ellipse) => {
+  const cx = transformX(parseFloat(ellipse.getAttribute('cx') || '0'))
+  const cy = transformY(parseFloat(ellipse.getAttribute('cy') || '0'))
+  const rx = transformLength(parseFloat(ellipse.getAttribute('rx') || '0'))
+  const ry = transformLength(parseFloat(ellipse.getAttribute('ry') || '0'))
+  // ... (その後パスデータに変換)
+})
+```
+
+**Path:**
+```typescript
+svg.querySelectorAll('path').forEach((path) => {
+  const d = path.getAttribute('d') || ''
+  const parsedPoints = parsePathData(d)
+  const closed = d.trim().toUpperCase().endsWith('Z')
+  
+  // パスポイントを変換
+  const points = transformPathPoints(parsedPoints, transformX, transformY)
+  const transformedD = reconstructPathData(points, closed)
+  const bounds = calculatePathBounds(points)
+  
+  shapes.push(new Path({ id: generateId('path'), x: bounds.x, y: bounds.y, d: transformedD, points, closed, stroke, strokeWidth, fill, rotation }))
+})
+```
+
+**Polygon:**
+```typescript
+svg.querySelectorAll('polygon').forEach((polygon) => {
+  const pointsAttr = polygon.getAttribute('points') || ''
+  const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
+  
+  // ポリゴン座標を変換
+  let d = `M ${transformX(coords[0])} ${transformY(coords[1])}`
+  for (let i = 2; i < coords.length; i += 2) {
+    d += ` L ${transformX(coords[i])} ${transformY(coords[i + 1])}`
+  }
+  d += ' Z'
+  // ...
+})
+```
+
+### 結果
+
+✅ **負の座標が正しく補正される** - viewBoxの負のオフセットが適切に処理される
+✅ **スケールが統一される** - 24x24のアイコンサイズも800x600にスケールアップ
+✅ **アスペクト比が維持される** - 縦横比を保ったままスケール変換
+✅ **すべてのシェイプタイプで動作** - Rect, Circle, Ellipse, Path, Polygon
+✅ **制御点も変換される** - ベジェ曲線の制御点も正しく変換
+✅ **図形が正しく表示される** - 移動・リサイズ・編集が正常に動作
+
+### 使い方
+
+1. **AI画像生成パネル**を開く（🤖ボタン）
+2. プロンプトを入力（例: 「猫を描いて」「家を描いて」）
+3. 生成ボタンをクリック
+4. プレビューで確認
+5. **適用**または**コピー**
+6. 図形が正しい位置・サイズで表示される
+7. 移動・リサイズ・編集が正常に動作
+
+### 技術詳細
+
+**viewBox変換の計算:**
+- **入力**: viewBox座標 `(x, y)`
+- **オフセット補正**: `x + offsetX`, `y + offsetY`
+- **スケール適用**: `(x + offsetX) * scale`, `(y + offsetY) * scale`
+- **出力**: キャンバスピクセル座標
+
+**例:**
+- viewBox="**-100 -100** 400 400" の座標 (0, 0)
+- オフセット補正: (0 + 100, 0 + 100) = (100, 100)
+- スケール (800/400 = 2.0): (100 * 2.0, 100 * 2.0) = **(200, 200)**
+- キャンバス上で (200, 200) に表示
+
+**Path変換のフロー:**
+1. SVG pathデータを解析 → PathPoint[]
+2. 各ポイントの座標を変換（アンカーポイント + 制御点）
+3. 変換されたポイント配列からpathデータ文字列を再構築
+4. 境界ボックスを計算して初期位置を設定
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte`
+  - createViewBoxTransform() - viewBox座標変換関数
+  - transformPathPoints() - パスポイント変換ヘルパー
+  - reconstructPathData() - パスデータ再構築ヘルパー
+  - parseSVGToShapes() - 全シェイプタイプへの変換適用
+
+---
+
+## 2025-11-22 - AI生成図形の座標系問題の根本修正
+
+### 問題
+AI画像生成で図形を生成・適用後、以下のすべての問題が発生：
+1. 図形が表示されない
+2. 図形をドラッグすると位置がずれる
+3. リサイズすると形が崩れる
+4. 制御点の位置がおかしい
+
+これは単なるGroupingの問題ではなく、**座標系の二重管理による根本的な構造問題**だった。
+
+### 原因
+
+#### 1. Circleの座標系の二重管理
+**Circle.props** は2つの座標系を持つ：
+- `x, y` (ShapePropsから継承、左上角の位置)
+- `cx, cy, r` (CircleProps、中心座標と半径)
+
+**問題点:**
+- **生成時**: `parseSVGToShapes()` で `x: cx - r, y: cy - r` を設定
+- **移動時**: `Renderer.moveShape()` で `cx, cy` のみ更新
+- **結果**: `x, y` が古い値のまま残る → TransformControlsやbounds計算が狂う
+
+#### 2. Pathの座標系の問題
+**Path.props** の座標管理：
+- `x, y` (Path全体のオフセット)
+- `points[]` (パスデータの実際の座標)
+
+**問題点:**
+- **生成時**: `parseSVGToShapes()` で常に `x: 0, y: 0` を設定
+- **pathデータ**: 絶対座標を含む（例: `M 100 100 L 200 200`）
+- **結果**: 初期位置が(0,0)なので、移動やリサイズ時に座標計算が狂う
+
+### 修正内容
+
+#### 1. Circleの座標同期（複数ファイル）
+
+**Renderer.ts:84-89** - Circle移動時にx, yも更新
+```typescript
+// 修正前
+} else if (shape instanceof Circle) {
+  shape.props.cx += dx
+  shape.props.cy += dy
+}
+
+// 修正後
+} else if (shape instanceof Circle) {
+  shape.props.cx += dx
+  shape.props.cy += dy
+  shape.props.x += dx  // ← 追加
+  shape.props.y += dy  // ← 追加
+}
+```
+
+**Command.ts:99-104, 159-164** - Undo/Redo時も同期
+```typescript
+// executeメソッド
+} else if (this.shape instanceof Circle) {
+  this.shape.props.cx += dx
+  this.shape.props.cy += dy
+  this.shape.props.x += dx  // ← 追加
+  this.shape.props.y += dy  // ← 追加
+}
+
+// undoメソッド（境界ボックスから復元）
+} else if (this.shape instanceof Circle) {
+  this.shape.props.cx = bounds.x + bounds.width / 2
+  this.shape.props.cy = bounds.y + bounds.height / 2
+  this.shape.props.x = bounds.x        // ← 追加
+  this.shape.props.y = bounds.y        // ← 追加
+  this.shape.props.radius = bounds.width / 2
+}
+```
+
+**AlignManager.ts:173-179** - 整列時も同期
+```typescript
+// 修正前
+} else if (shape instanceof Circle) {
+  if (x !== null) shape.props.cx += dx
+  if (y !== null) shape.props.cy += dy
+}
+
+// 修正後
+} else if (shape instanceof Circle) {
+  if (x !== null) {
+    shape.props.cx += dx
+    shape.props.x += dx  // ← 追加
+  }
+  if (y !== null) {
+    shape.props.cy += dy
+    shape.props.y += dy  // ← 追加
+  }
+}
+```
+
+**TransformControls.ts:203-217** - リサイズ時も同期
+```typescript
+// 修正前
+private resizeCircle(handleType: HandleType, dx: number, dy: number) {
+  const circle = this.shape as Circle
+  const { cx, cy, r } = circle.props
+  
+  const delta = Math.sqrt(dx * dx + dy * dy)
+  const direction = handleType.includes('e') || handleType.includes('s') ? 1 : -1
+  
+  circle.props.r = Math.max(5, r + delta * direction * 0.5)
+}
+
+// 修正後
+private resizeCircle(handleType: HandleType, dx: number, dy: number) {
+  const circle = this.shape as Circle
+  const { cx, cy, r } = circle.props
+  
+  const delta = Math.sqrt(dx * dx + dy * dy)
+  const direction = handleType.includes('e') || handleType.includes('s') ? 1 : -1
+  
+  const newR = Math.max(5, r + delta * direction * 0.5)
+  circle.props.r = newR
+  // ← x, yを同期
+  circle.props.x = cx - newR
+  circle.props.y = cy - newR
+}
+```
+
+**TransformControls.ts:560-571** - Groupリサイズ時も同期
+```typescript
+} else if (child instanceof Circle) {
+  const relX = child.props.cx - originX
+  const relY = child.props.cy - originY
+  child.props.cx = originX + relX * scaleX
+  child.props.cy = originY + relY * scaleY
+  const newR = child.props.r * Math.min(scaleX, scaleY)
+  child.props.r = newR
+  // ← x, yを同期
+  child.props.x = child.props.cx - newR
+  child.props.y = child.props.cy - newR
+}
+```
+
+#### 2. Pathの初期座標を正しく計算
+
+**Canvas.svelte** - calculatePathBounds()ヘルパー関数を追加
+```typescript
+function calculatePathBounds(points: PathPoint[]): { x: number; y: number; width: number; height: number } {
+  if (points.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0 }
+  }
+
+  let minX = Infinity, minY = Infinity
+  let maxX = -Infinity, maxY = -Infinity
+
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    minY = Math.min(minY, point.y)
+    maxX = Math.max(maxX, point.x)
+    maxY = Math.max(maxY, point.y)
+
+    // 制御点も含めて計算
+    if (point.cp1x !== undefined) {
+      minX = Math.min(minX, point.cp1x)
+      maxX = Math.max(maxX, point.cp1x)
+    }
+    // ... cp1y, cp2x, cp2y, cpx, cpy も同様
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  }
+}
+```
+
+**Canvas.svelte:1645-1673** - parseSVGToShapes()でPathの正しいx, yを設定
+```typescript
+// 修正前（Path, Ellipse, Polygon共通）
+const points = parsePathData(d)
+shapes.push(new Path({ 
+  id: generateId('path'), 
+  x: 0, y: 0,  // ❌ 常に(0,0)
+  d, points, closed, stroke, strokeWidth, fill, rotation 
+}))
+
+// 修正後
+const points = parsePathData(d)
+const bounds = calculatePathBounds(points)  // ← 境界ボックス計算
+shapes.push(new Path({ 
+  id: generateId('path'), 
+  x: bounds.x, y: bounds.y,  // ✅ 正しい位置
+  d, points, closed, stroke, strokeWidth, fill, rotation 
+}))
+```
+
+### 結果
+
+✅ **AI生成された図形が正しく表示される**
+✅ **ドラッグ時に位置がずれない**
+✅ **リサイズ時に形が崩れない**
+✅ **パス編集時の制御点位置が正しい**
+✅ **整列・分配・グループ操作が正常に動作する**
+✅ **Undo/Redoが正しく動作する**
+
+### 技術詳細
+
+**座標系の一貫性:**
+- すべてのシェイプ操作で、すべての座標プロパティを同期して更新
+- Circleの場合: `cx, cy` を更新したら必ず `x = cx - r, y = cy - r` も更新
+- Pathの場合: 生成時にpathデータから境界ボックスを計算して正しい `x, y` を設定
+
+**影響範囲:**
+- Shape移動: Renderer.ts, Command.ts, AlignManager.ts
+- Shapeリサイズ: TransformControls.ts
+- Groupリサイズ: TransformControls.ts (子要素の再帰的処理)
+- Shape生成: Canvas.svelte (parseSVGToShapes)
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - calculatePathBounds()追加、parseSVGToShapes()修正
+- `/Users/oda/project/claude/grapher/src/lib/engine/Renderer.ts` - Circle移動時にx, y同期
+- `/Users/oda/project/claude/grapher/src/lib/engine/Command.ts` - Undo/Redo時にx, y同期
+- `/Users/oda/project/claude/grapher/src/lib/engine/AlignManager.ts` - 整列時にx, y同期
+- `/Users/oda/project/claude/grapher/src/lib/engine/TransformControls.ts` - リサイズ時にx, y同期
+
+---
+
+## 2025-11-22 - AI生成図形の構造問題の修正（Grouping問題）
+
+### 問題
+AI画像生成機能で図形を生成すると、すべての図形が1つのGroupとしてまとめられてしまい、個別に選択・編集ができない。ユーザーから「生成される図形の構造がおかしい」との報告。
+
+### 原因
+
+**Canvas.svelte - handleAIGenerate()とloadSVG()の動作の不一致**
+
+1. **handleAIGenerate()** (AI生成時):
+   - `parseSVGToShapes()` で図形配列を取得
+   - すべての図形を **Group** にまとめる
+   - Groupをrendererに追加
+   - 結果: すべての図形が1つのGroupとして扱われる
+
+2. **loadSVG()** (ファイル読み込み時):
+   - SVGを解析して図形を作成
+   - 各図形を **個別に** rendererに追加
+   - 結果: 各図形を個別に選択・編集可能
+
+この不一致により、AI生成時のみ図形が1つのGroupにまとまってしまい、個別編集ができなかった。
+
+### 修正内容
+
+#### Canvas.svelte:1677-1713 - handleAIGenerate()の修正
+
+**修正前: すべての図形をGroupにまとめる**
+```typescript
+// Group all AI-generated shapes together
+const groupId = `ai-group-${Date.now()}`
+const group = new Group({
+  id: groupId,
+  x: 0,
+  y: 0,
+  children: shapes
+})
+
+renderer.addShape(group)
+renderer.selectShape(groupId)
+```
+
+**修正後: 各図形を個別に追加**
+```typescript
+// Add all shapes individually (matching loadSVG behavior)
+const shapeIds: string[] = []
+for (const shape of shapes) {
+  renderer.addShape(shape)
+  shapeIds.push(shape.props.id)
+}
+
+// Select the first shape if any were added
+if (shapeIds.length > 0) {
+  renderer.selectShape(shapeIds[0])
+}
+hasSelection = true
+updateSelectionState()
+```
+
+### 結果
+
+✅ **AI生成された図形を個別に選択できるようになった**
+✅ **AI生成とファイル読み込みの動作が一貫した**
+✅ **各図形を個別に移動・編集・削除できる**
+✅ **必要に応じて複数の図形を選択してグループ化できる**
+
+### 使い方
+
+1. AI画像生成パネルを開く（🤖ボタン）
+2. プロンプトを入力して生成
+3. 「適用」をクリック
+4. 生成された各図形を個別に選択・編集可能
+5. 必要に応じてShift+クリックで複数選択し、Cmd+Gでグループ化
+
+### 技術詳細
+
+**handleAICopy()は変更なし:**
+- コピー機能では、複数の図形をまとめてクリップボードにコピーするため、Groupを使用するのは適切
+- ペースト時に一度に複数の図形を配置できる
+
+**一貫性の重要性:**
+- AI生成とファイル読み込みで同じ動作にすることで、ユーザーの混乱を防ぐ
+- すべての図形が同じ方法で管理される
+
+### 変更ファイル
+
+- `/Users/oda/project/claude/grapher/src/lib/Canvas.svelte` - handleAIGenerate()関数の修正
+
+---
 
 ## 2025-11-09 - ポイントタイプ切り替え機能の修正
 

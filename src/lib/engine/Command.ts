@@ -99,6 +99,8 @@ export class MoveShapeCommand implements Command {
     } else if (this.shape instanceof Circle) {
       this.shape.props.cx += dx
       this.shape.props.cy += dy
+      this.shape.props.x += dx
+      this.shape.props.y += dy
     } else if (this.shape instanceof Line) {
       this.shape.props.x1 += dx
       this.shape.props.y1 += dy
@@ -157,6 +159,8 @@ export class ResizeShapeCommand implements Command {
     } else if (this.shape instanceof Circle) {
       this.shape.props.cx = bounds.x + bounds.width / 2
       this.shape.props.cy = bounds.y + bounds.height / 2
+      this.shape.props.x = bounds.x
+      this.shape.props.y = bounds.y
       this.shape.props.radius = bounds.width / 2
     } else if (this.shape instanceof Line) {
       // Line は getBounds() の x, y, width, height から x1, y1, x2, y2 を復元
