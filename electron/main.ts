@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import Store from 'electron-store'
+import { getLlamaManager } from './LlamaManager.js'
 
 // ESM compatibility
 const __filename = fileURLToPath(import.meta.url)
@@ -249,10 +250,29 @@ function createWindow() {
   })
 }
 
+// Initialize Llama Manager with custom directory
+function initializeLlamaManager() {
+  const customDir = store.get('llamaModelsDirectory') as string | undefined
+  if (customDir) {
+    try {
+      const llamaManager = getLlamaManager()
+      llamaManager.setModelsDirectory(customDir)
+      console.log('Restored custom models directory:', customDir)
+    } catch (error) {
+      console.warn('Failed to restore custom models directory:', error)
+      // Remove invalid directory from store
+      store.delete('llamaModelsDirectory')
+    }
+  }
+}
+
 app.whenReady().then(() => {
   // Initialize API keys from environment variables
   initializeAPIKeys()
-  
+
+  // Initialize Llama Manager with saved custom directory
+  initializeLlamaManager()
+
   createMenu()
   createWindow()
 })
@@ -528,7 +548,7 @@ ipcMain.handle('openai-api-request', async (_event, { apiKey, prompt }: { apiKey
       return { success: true, data }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
-      
+
       if (attempt < maxRetries - 1) {
         const waitTime = Math.pow(2, attempt) * 1000
         console.warn(`OpenAI API request failed, retrying in ${waitTime}ms...`)
@@ -538,4 +558,149 @@ ipcMain.handle('openai-api-request', async (_event, { apiKey, prompt }: { apiKey
   }
 
   return { success: false, error: lastError?.message || 'Unknown error' }
+})
+
+// ============================================================================
+// Local LLM (Llama) IPC Handlers
+// ============================================================================
+
+// List available local models
+ipcMain.handle('llama-list-models', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    const models = llamaManager.listModels()
+    return { success: true, models }
+  } catch (error) {
+    console.error('Error listing models:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error), models: [] }
+  }
+})
+
+// Load a local model
+ipcMain.handle('llama-load-model', async (_event, modelName?: string) => {
+  try {
+    const llamaManager = getLlamaManager()
+    await llamaManager.loadModel(modelName)
+    return { success: true }
+  } catch (error) {
+    console.error('Error loading model:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Unload the current model
+ipcMain.handle('llama-unload-model', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    await llamaManager.unloadModel()
+    return { success: true }
+  } catch (error) {
+    console.error('Error unloading model:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Check if a model is loaded
+ipcMain.handle('llama-is-model-loaded', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    const isLoaded = llamaManager.isModelLoaded()
+    return { success: true, isLoaded }
+  } catch (error) {
+    console.error('Error checking model status:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error), isLoaded: false }
+  }
+})
+
+// Generate SVG using local LLM
+ipcMain.handle('llama-generate-svg', async (_event, prompt: string) => {
+  try {
+    const llamaManager = getLlamaManager()
+    const svg = await llamaManager.generateSVG(prompt)
+    return { success: true, svg }
+  } catch (error) {
+    console.error('Error generating SVG:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Get models directory path
+ipcMain.handle('llama-get-models-dir', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    const modelsDir = llamaManager.getModelsDirectory()
+    return { success: true, path: modelsDir }
+  } catch (error) {
+    console.error('Error getting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Update Llama configuration
+ipcMain.handle('llama-update-config', async (_event, config: { contextSize?: number; gpuLayers?: number }) => {
+  try {
+    const llamaManager = getLlamaManager()
+    llamaManager.updateConfig(config)
+    return { success: true }
+  } catch (error) {
+    console.error('Error updating config:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Get Llama configuration
+ipcMain.handle('llama-get-config', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    const config = llamaManager.getConfig()
+    return { success: true, config }
+  } catch (error) {
+    console.error('Error getting config:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Get loaded model name
+ipcMain.handle('llama-get-loaded-model-name', async () => {
+  try {
+    const llamaManager = getLlamaManager()
+    const modelName = llamaManager.getLoadedModelName()
+    return { success: true, modelName }
+  } catch (error) {
+    console.error('Error getting loaded model name:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Select models directory with dialog
+ipcMain.handle('llama-select-models-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Models Directory',
+      properties: ['openDirectory', 'createDirectory']
+    })
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+
+    return { success: true, path: result.filePaths[0] }
+  } catch (error) {
+    console.error('Error selecting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Set models directory
+ipcMain.handle('llama-set-models-dir', async (_event, dirPath: string) => {
+  try {
+    const llamaManager = getLlamaManager()
+    llamaManager.setModelsDirectory(dirPath)
+    // Save to electron-store for persistence
+    store.set('llamaModelsDirectory', dirPath)
+    return { success: true }
+  } catch (error) {
+    console.error('Error setting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
 })

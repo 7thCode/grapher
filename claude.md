@@ -1,6 +1,297 @@
 # Grapher - 開発ログ
 # Grapher - 開発ログ
 
+## 2025-11-24 - ローカルLLM統合の実装計画
+
+### 目的
+- **コスト削減**: OpenAI/Claude APIの使用料を削減
+- **実験機能**: ローカル環境でのLLM実験を可能に
+
+### アーキテクチャ決定
+
+**選択した方式: llamaApp方式（node-llama-cpp完全ローカル実行）**
+
+**理由:**
+- モデル選択の自由度が高い（任意のGGUFモデルを使用可能）
+- 完全オフライン動作が可能
+- ElectronアプリでのネイティブモジュールビルドのノウハウがllamaAppで確立済み
+- モデルダウンロード機能により初回セットアップが容易
+
+**スコープ:**
+- AI画像生成機能のみローカルLLM対応
+- 既存のOpenAI/Claude APIオプションは維持
+- ユーザーがプロバイダーを選択可能（OpenAI/Claude/Local LLM）
+
+### 実装ステップ
+
+#### 1. node-llama-cppのインストールとビルド設定
+```json
+// package.json
+{
+  "dependencies": {
+    "node-llama-cpp": "^3.x.x"
+  },
+  "scripts": {
+    "rebuild": "electron-rebuild -f -w node-llama-cpp"
+  },
+  "build": {
+    "asarUnpack": [
+      "node_modules/node-llama-cpp/**/*"
+    ]
+  }
+}
+```
+
+#### 2. LlamaManagerクラスの実装（Main Process）
+`electron/LlamaManager.ts`を作成:
+- モデルの読み込み・管理
+- 推論リクエストの処理
+- モデルダウンロード機能
+- GPUアクセラレーション設定
+
+#### 3. LlamaAPI.tsの実装（Renderer Process）
+`src/lib/ai/LlamaAPI.ts`を作成:
+- Main processとのIPC通信
+- SVG生成プロンプト処理
+- エラーハンドリング
+
+#### 4. モデルダウンロード機能
+- HuggingFace APIを使用したモデル一覧取得
+- プログレス表示付きダウンロード
+- ローカルストレージ管理
+
+#### 5. 設定画面の拡張
+`SettingsPanel.svelte`に追加:
+- モデル選択UI
+- ダウンロードステータス表示
+- GPU/CPU切り替え
+- コンテキストサイズ設定
+
+#### 6. AIPanelの拡張
+プロバイダー選択に「Local LLM」を追加:
+- OpenAI / Claude / **Local LLM**
+- Local LLM選択時はローカルモデルを使用
+- API key不要で動作
+
+#### 7. 推奨モデル
+- **Llama 3.2 3B GGUF** (軽量、高速)
+- **Qwen2.5-Coder 7B GGUF** (コード生成特化)
+- 8GB RAM以上のシステムで動作可能
+
+### 技術的課題と対策
+
+**課題1: ネイティブモジュールのビルド**
+- 対策: electron-rebuildの使用、llamaAppの実績あるビルド設定を参考
+
+**課題2: モデルサイズ（数GB）**
+- 対策: 初回のみダウンロード、ローカルにキャッシュ、必要に応じて削除可能
+
+**課題3: 推論速度**
+- 対策: GPU対応、小型モデル（3B-7B）の使用、ストリーミング非対応で完全生成のみ
+
+**課題4: SVG品質**
+- 対策: プロンプトエンジニアリング、Few-shot examples、後処理バリデーション
+
+### 実装完了
+
+#### 完了したステップ
+1. ✅ 実装計画を作成
+2. ✅ node-llama-cppのインストールとビルド設定
+3. ✅ LlamaManagerクラスの実装（Main Process）
+4. ✅ LlamaAPI.tsの実装（Renderer Process）
+5. ✅ AIPanelでLlamaを選択可能に
+6. ✅ 設定画面にローカルLLM設定を追加
+
+#### 実装されたファイル
+
+**Main Process:**
+- `electron/LlamaManager.ts` - モデル管理、推論処理
+- `electron/main.ts` - IPCハンドラー追加（llama-*）
+- `electron/preload.ts` - Llama API公開
+
+**Renderer Process:**
+- `src/lib/ai/LlamaAPI.ts` - Main processとの通信ラッパー
+- `src/lib/AIPanel.svelte` - "Local LLM (Llama)" プロバイダー追加
+- `src/lib/SettingsPanel.svelte` - ローカルLLM設定UI
+
+**Configuration:**
+- `package.json` - node-llama-cpp、electron-rebuild、ビルド設定
+
+### 使い方
+
+#### 1. モデルの準備
+GGUF形式のモデルファイルを以下のディレクトリに配置：
+- **macOS**: `~/Library/Application Support/Grapher/models/`
+- **Windows**: `%APPDATA%\Grapher\models\`
+- **Linux**: `~/.config/Grapher/models/`
+
+#### 2. 推奨モデル
+- **Llama 3.2 3B GGUF** (軽量、8GB RAM)
+- **Qwen2.5-Coder 7B GGUF** (コード生成特化、16GB RAM)
+
+#### 3. 設定
+1. 設定画面（⚙️）を開く
+2. ローカルLLMセクションでモデルを選択
+3. 「モデルを読み込む」をクリック
+4. GPU Layers（0 = CPU、数値増加でGPU使用）
+5. Context Size（2048/4096/8192）
+6. 設定を保存
+
+#### 4. AI画像生成で使用
+1. AI画像生成パネル（🤖）を開く
+2. LLMプロバイダーで「Local LLM (Llama)」を選択
+3. プロンプトを入力して生成
+
+### 技術詳細
+
+**アーキテクチャ:**
+- Main Process: node-llama-cppでネイティブLLM実行
+- Renderer Process: IPCでMain Processと通信
+- 自動モデルロード: 初回使用時に自動的にモデルを読み込み
+
+**メモリ管理:**
+- モデルはユーザーがロードするまでメモリに読み込まれない
+- 使用後はアンロードしてメモリ解放可能
+
+**GPU対応:**
+- GPU Layers設定でGPUアクセラレーション可能
+- 0 = CPUのみ、値が大きいほどGPU使用率向上
+
+### 今後の拡張
+
+**モデルダウンロード機能（オプション）:**
+- HuggingFace APIからモデル一覧取得
+- GUIからワンクリックでダウンロード
+- プログレス表示
+
+### API v3対応の修正
+
+#### 問題: モデル読み込み時のエラー
+
+**症状:**
+```
+Cannot destructure property '_llama' of 'undefined' as it is undefined.
+```
+
+**原因:** node-llama-cpp v3.14.2ではAPIが大きく変更されていた。v2のAPIを使っていたため、初期化に失敗。
+
+**v2 API（旧）:**
+```typescript
+this.model = new LlamaModel({ modelPath, gpuLayers })
+this.context = new LlamaContext({ model: this.model, contextSize })
+this.session = new LlamaChatSession({ context: this.context })
+```
+
+**v3 API（新）:**
+```typescript
+// 1. getLlama()でLlamaインスタンスを取得
+this.llama = await getLlama()
+
+// 2. llama.loadModel()でモデルを読み込み
+this.model = await this.llama.loadModel({ modelPath, gpuLayers })
+
+// 3. model.createContext()でコンテキストを作成
+this.context = await this.model.createContext({ contextSize })
+
+// 4. contextSequence: context.getSequence()でセッションを作成
+this.session = new LlamaChatSession({
+  contextSequence: this.context.getSequence()
+})
+```
+
+**修正内容:**
+
+`electron/LlamaManager.ts`:
+- `getLlama` をインポート
+- `Llama` インスタンスをクラスに保持
+- `loadModel()` メソッドで v3 API を使用
+- 型インポートに `type` キーワードを使用
+
+**結果:**
+✅ モデルが正常に読み込まれる
+✅ `Model loaded successfully` がコンソールに表示される
+✅ AI画像生成でLocal LLMが使用可能
+
+### ビルドエラーと解決方法
+
+#### エラー1: Vite/Rollupのインポートエラー
+
+**症状:**
+```
+[vite]: Rollup failed to resolve import "@node-llama-cpp/mac-x64"
+```
+
+**原因:** Vite/Rollupがnode-llama-cppのネイティブモジュールをバンドルしようとした。これらのモジュールはMain Processでのみ実行されるべきで、バンドルから除外する必要がある。
+
+**解決方法:**
+
+`vite.config.ts` の electron main entry設定に external dependencies を追加:
+
+```typescript
+electron([
+  {
+    entry: 'electron/main.ts',
+    vite: {
+      build: {
+        rollupOptions: {
+          external: [
+            'node-llama-cpp',
+            '@node-llama-cpp/mac-x64',
+            '@node-llama-cpp/mac-arm64',
+            '@node-llama-cpp/linux-x64',
+            '@node-llama-cpp/linux-arm64',
+            '@node-llama-cpp/win32-x64'
+          ]
+        }
+      }
+    }
+  },
+  // ...
+])
+```
+
+#### エラー2: electron-builderのプラットフォームディレクトリスキャンエラー
+
+**症状:**
+```
+ENOENT: no such file or directory, scandir '/Users/oda/project/claude/grapher/node_modules/@node-llama-cpp/linux-arm64'
+```
+
+**原因:** electron-builderがLinux/Windowsプラットフォームのバイナリディレクトリをスキャンしようとしたが、macOS開発環境には存在しない。
+
+**解決方法:**
+
+ダミーディレクトリを作成してelectron-builderのスキャンを満たす:
+
+```bash
+mkdir -p node_modules/@node-llama-cpp/linux-arm64
+mkdir -p node_modules/@node-llama-cpp/linux-x64
+mkdir -p node_modules/@node-llama-cpp/win32-x64
+```
+
+**package.json の build.files設定:**
+```json
+"files": [
+  "dist/**/*",
+  "dist-electron/**/*",
+  "node_modules/**/*",
+  "!node_modules/@node-llama-cpp/linux-*",
+  "!node_modules/@node-llama-cpp/win32-*"
+]
+```
+
+注: 除外パターン（`!node_modules/@node-llama-cpp/linux-*`）だけではelectron-builderのスキャンエラーを防げなかったため、ダミーディレクトリの作成が必要でした。
+
+#### 結果
+
+✅ Viteビルド成功（dist/ および dist-electron/）
+✅ electron-builderパッケージング成功
+✅ DMGおよびZIPファイル作成
+- `release/Grapher-0.0.0-arm64.dmg`
+- `release/Grapher-0.0.0-arm64-mac.zip`
+
+---
+
 ## 2025-11-22 - AI生成SVGのviewBox座標変換の実装
 
 ### 問題

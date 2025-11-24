@@ -38,7 +38,10 @@
       "mcp__serena__insert_before_symbol",
       "mcp__serena__replace_content",
       "Bash(npm install:*)",
-      "mcp__serena__create_text_file"
+      "mcp__serena__create_text_file",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "mcp__serena__find_file"
     ],
     "deny": [],
     "ask": []

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ClaudeAPI, type SVGGenerationResult as ClaudeSVGResult } from './ai/ClaudeAPI'
   import { OpenAIAPI, type SVGGenerationResult as OpenAISVGResult } from './ai/OpenAIAPI'
+  import { LlamaAPI } from './ai/LlamaAPI'
 
   type SVGGenerationResult = ClaudeSVGResult | OpenAISVGResult
 
@@ -19,8 +20,9 @@
   let isLoading = $state(false)
   let error = $state<string | null>(null)
   let lastGenerateTime = $state(0)
-  let availableProviders = $state<{ provider: 'openai' | 'anthropic'; key: string }[]>([])
-  let selectedProvider = $state<'openai' | 'anthropic' | null>(null)
+  let availableProviders = $state<{ provider: 'openai' | 'anthropic' | 'llama'; key?: string }[]>([])
+  let selectedProvider = $state<'openai' | 'anthropic' | 'llama' | null>(null)
+  let loadedModelName = $state<string | null>(null)
 
   // Rate limiting: max 5 requests per minute
   const RATE_LIMIT_MS = 12000 // 12 seconds between requests
@@ -53,13 +55,27 @@
       try {
         const providers = await (window as any).electron.getAPIKey()
         availableProviders = providers
+
+        // Always add Local LLM option (no API key required)
+        availableProviders.push({ provider: 'llama' })
+
+        // Load the currently loaded model name
+        try {
+          loadedModelName = await LlamaAPI.getLoadedModelName()
+        } catch (err) {
+          console.error('Failed to get loaded model name:', err)
+          loadedModelName = null
+        }
+
         // Select first available provider by default
-        if (providers.length > 0 && !selectedProvider) {
-          selectedProvider = providers[0].provider
+        if (availableProviders.length > 0 && !selectedProvider) {
+          selectedProvider = availableProviders[0].provider
         }
       } catch (err) {
         console.error('Failed to load providers:', err)
-        error = 'APIキーの取得に失敗しました'
+        // Even if API key loading fails, offer Local LLM
+        availableProviders = [{ provider: 'llama' }]
+        selectedProvider = 'llama'
       }
     }
     loadProviders()
@@ -95,11 +111,24 @@
 
       // Use the appropriate API based on the selected provider
       if (selectedProvider === 'openai') {
-        const api = new OpenAIAPI(providerConfig.key)
+        const api = new OpenAIAPI(providerConfig.key!)
         generatedResult = await api.generateSVG(prompt)
-      } else {
-        const api = new ClaudeAPI(providerConfig.key)
+      } else if (selectedProvider === 'anthropic') {
+        const api = new ClaudeAPI(providerConfig.key!)
         generatedResult = await api.generateSVG(prompt)
+      } else if (selectedProvider === 'llama') {
+        // Local LLM - no API key required
+        // Auto-load model if not already loaded
+        const isLoaded = await LlamaAPI.isModelLoaded()
+        if (!isLoaded) {
+          const loaded = await LlamaAPI.autoLoadModel()
+          if (!loaded) {
+            throw new Error('ローカルLLMモデルが見つかりません。設定画面からモデルをダウンロードしてください。')
+          }
+        }
+
+        const svg = await LlamaAPI.generateSVG(prompt)
+        generatedResult = { svg, model: 'local-llm' }
       }
     } catch (err) {
       if (err instanceof Error) {
@@ -160,7 +189,9 @@
         <select id="provider-select" bind:value={selectedProvider}>
           {#each availableProviders as provider}
             <option value={provider.provider}>
-              {provider.provider === 'openai' ? 'OpenAI GPT-4o' : 'Claude Sonnet 4.5'}
+              {provider.provider === 'openai' ? 'OpenAI GPT-4o' :
+               provider.provider === 'anthropic' ? 'Claude Sonnet 4.5' :
+               loadedModelName ? `Local LLM (${loadedModelName})` : 'Local LLM (未ロード)'}
             </option>
           {/each}
         </select>
