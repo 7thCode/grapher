@@ -8,6 +8,7 @@
   import { Rect, Circle, Line, Path, TextBox, Group, isGradient } from './engine/Shape'
   import AIPanel from './AIPanel.svelte'
   import SettingsPanel from './SettingsPanel.svelte'
+  import ModelStore from './ModelStore.svelte'
 
   let canvas: HTMLCanvasElement
   let canvasContainer: HTMLElement
@@ -57,6 +58,9 @@
 
   // Settings Panel state
   let showSettingsPanel = $state(false)
+
+  // Model Store state
+  let showModelStore = $state(false)
 
   // Text editing state
   let isEditingText = false
@@ -886,9 +890,9 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    // If AI Panel or Settings Panel is open, only allow Escape key to close it
+    // If AI Panel, Settings Panel, or Model Store is open, only allow Escape key to close it
     // All other keyboard events should be ignored to allow text editing
-    if ((showAIPanel || showSettingsPanel) && e.key !== 'Escape') {
+    if ((showAIPanel || showSettingsPanel || showModelStore) && e.key !== 'Escape') {
       return
     }
 
@@ -970,6 +974,9 @@
       } else if (showSettingsPanel) {
         e.preventDefault()
         showSettingsPanel = false
+      } else if (showModelStore) {
+        e.preventDefault()
+        showModelStore = false
       } else if (currentTool === 'path') {
         toolManager.cancelDrawing()
         renderer.setPreview(null)
@@ -1949,107 +1956,112 @@
     // Create coordinate transformation functions for viewBox
     const { transformX, transformY, transformLength } = createViewBoxTransform(svg)
 
-    // Parse Rects
-    svg.querySelectorAll('rect').forEach((rect) => {
-      const x = transformX(parseFloat(rect.getAttribute('x') || '0'))
-      const y = transformY(parseFloat(rect.getAttribute('y') || '0'))
-      const width = transformLength(parseFloat(rect.getAttribute('width') || '0'))
-      const height = transformLength(parseFloat(rect.getAttribute('height') || '0'))
-      const fill = parseFill(rect.getAttribute('fill'), gradients) || '#4CAF50'
-      const stroke = normalizeColor(rect.getAttribute('stroke') || undefined)
-      const strokeWidth = parseFloat(rect.getAttribute('stroke-width') || '1')
-      const rotation = parseRotation(rect)
-      shapes.push(new Rect({ id: generateId('rect'), x, y, width, height, fill, stroke, strokeWidth, rotation }))
-    })
+    // Helper function to process an element
+    const processElement = (element: Element) => {
+      const tagName = element.tagName.toLowerCase()
 
-    // Parse Circles
-    svg.querySelectorAll('circle').forEach((circle) => {
-      const cx = transformX(parseFloat(circle.getAttribute('cx') || '0'))
-      const cy = transformY(parseFloat(circle.getAttribute('cy') || '0'))
-      const r = transformLength(parseFloat(circle.getAttribute('r') || '0'))
-      const fill = parseFill(circle.getAttribute('fill'), gradients) || '#4CAF50'
-      const stroke = normalizeColor(circle.getAttribute('stroke') || undefined)
-      const strokeWidth = parseFloat(circle.getAttribute('stroke-width') || '1')
-      const rotation = parseRotation(circle)
-      shapes.push(new Circle({ id: generateId('circle'), x: cx - r, y: cy - r, cx, cy, r, fill, stroke, strokeWidth, rotation }))
-    })
-
-    // Parse Ellipses (convert to Path)
-    svg.querySelectorAll('ellipse').forEach((ellipse) => {
-      const cx = transformX(parseFloat(ellipse.getAttribute('cx') || '0'))
-      const cy = transformY(parseFloat(ellipse.getAttribute('cy') || '0'))
-      const rx = transformLength(parseFloat(ellipse.getAttribute('rx') || '0'))
-      const ry = transformLength(parseFloat(ellipse.getAttribute('ry') || '0'))
-      if (rx === 0 || ry === 0) return
-      const d = `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`
-      const fill = parseFill(ellipse.getAttribute('fill'), gradients) || '#4CAF50'
-      const stroke = normalizeColor(ellipse.getAttribute('stroke') || undefined)
-      const strokeWidth = parseFloat(ellipse.getAttribute('stroke-width') || '1')
-      const rotation = parseRotation(ellipse)
-      const points = parsePathData(d)
-      const bounds = calculatePathBounds(points)
-      shapes.push(new Path({ id: generateId('ellipse'), x: bounds.x, y: bounds.y, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
-    })
-
-    // Parse Paths
-    svg.querySelectorAll('path').forEach((path) => {
-      const d = path.getAttribute('d') || ''
-      const stroke = normalizeColor(path.getAttribute('stroke') || '#333333')
-      const strokeWidth = parseFloat(path.getAttribute('stroke-width') || '2')
-      const fillAttr = path.getAttribute('fill')
-      const fill = fillAttr === 'none' ? undefined : parseFill(fillAttr, gradients)
-      const rotation = parseRotation(path)
-      const parsedPoints = parsePathData(d)
-      const closed = d.trim().toUpperCase().endsWith('Z')
-      
-      // Transform path points to canvas coordinates
-      const points = transformPathPoints(parsedPoints, transformX, transformY)
-      const transformedD = reconstructPathData(points, closed)
-      const bounds = calculatePathBounds(points)
-      
-      shapes.push(new Path({ id: generateId('path'), x: bounds.x, y: bounds.y, d: transformedD, points, closed, stroke, strokeWidth, fill, rotation }))
-    })
-
-    // Parse Lines (convert to Path)
-    svg.querySelectorAll('line').forEach((line) => {
-      const x1 = transformX(parseFloat(line.getAttribute('x1') || '0'))
-      const y1 = transformY(parseFloat(line.getAttribute('y1') || '0'))
-      const x2 = transformX(parseFloat(line.getAttribute('x2') || '0'))
-      const y2 = transformY(parseFloat(line.getAttribute('y2') || '0'))
-      
-      // Convert line to path data
-      const d = `M ${x1} ${y1} L ${x2} ${y2}`
-      const stroke = normalizeColor(line.getAttribute('stroke') || '#333333')
-      const strokeWidth = parseFloat(line.getAttribute('stroke-width') || '2')
-      const rotation = parseRotation(line)
-      const points = parsePathData(d)
-      const bounds = calculatePathBounds(points)
-      
-      shapes.push(new Path({ id: generateId('line'), x: bounds.x, y: bounds.y, d, points, closed: false, stroke, strokeWidth, fill: undefined, rotation }))
-    })
-
-    // Parse Polygons
-    svg.querySelectorAll('polygon').forEach((polygon) => {
-      const pointsAttr = polygon.getAttribute('points') || ''
-      if (!pointsAttr.trim()) return
-      const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
-      if (coords.length < 6) return
-      
-      // Transform polygon coordinates
-      let d = `M ${transformX(coords[0])} ${transformY(coords[1])}`
-      for (let i = 2; i < coords.length; i += 2) {
-        d += ` L ${transformX(coords[i])} ${transformY(coords[i + 1])}`
+      if (tagName === 'rect') {
+        const x = transformX(parseFloat(element.getAttribute('x') || '0'))
+        const y = transformY(parseFloat(element.getAttribute('y') || '0'))
+        const width = transformLength(parseFloat(element.getAttribute('width') || '0'))
+        const height = transformLength(parseFloat(element.getAttribute('height') || '0'))
+        const fill = parseFill(element.getAttribute('fill'), gradients) || '#4CAF50'
+        const stroke = normalizeColor(element.getAttribute('stroke') || undefined)
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '1')
+        const rotation = parseRotation(element)
+        shapes.push(new Rect({ id: generateId('rect'), x, y, width, height, fill, stroke, strokeWidth, rotation }))
       }
-      d += ' Z'
-      
-      const fill = parseFill(polygon.getAttribute('fill'), gradients) || '#4CAF50'
-      const stroke = normalizeColor(polygon.getAttribute('stroke') || '#333333')
-      const strokeWidth = parseFloat(polygon.getAttribute('stroke-width') || '2')
-      const rotation = parseRotation(polygon)
-      const points = parsePathData(d)
-      const bounds = calculatePathBounds(points)
-      shapes.push(new Path({ id: generateId('polygon'), x: bounds.x, y: bounds.y, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
-    })
+      else if (tagName === 'circle') {
+        const cx = transformX(parseFloat(element.getAttribute('cx') || '0'))
+        const cy = transformY(parseFloat(element.getAttribute('cy') || '0'))
+        const r = transformLength(parseFloat(element.getAttribute('r') || '0'))
+        const fill = parseFill(element.getAttribute('fill'), gradients) || '#4CAF50'
+        const stroke = normalizeColor(element.getAttribute('stroke') || undefined)
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '1')
+        const rotation = parseRotation(element)
+        shapes.push(new Circle({ id: generateId('circle'), x: cx - r, y: cy - r, cx, cy, r, fill, stroke, strokeWidth, rotation }))
+      }
+      else if (tagName === 'ellipse') {
+        const cx = transformX(parseFloat(element.getAttribute('cx') || '0'))
+        const cy = transformY(parseFloat(element.getAttribute('cy') || '0'))
+        const rx = transformLength(parseFloat(element.getAttribute('rx') || '0'))
+        const ry = transformLength(parseFloat(element.getAttribute('ry') || '0'))
+        if (rx === 0 || ry === 0) return
+        const d = `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`
+        const fill = parseFill(element.getAttribute('fill'), gradients) || '#4CAF50'
+        const stroke = normalizeColor(element.getAttribute('stroke') || undefined)
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '1')
+        const rotation = parseRotation(element)
+        const points = parsePathData(d)
+        const bounds = calculatePathBounds(points)
+        shapes.push(new Path({ id: generateId('ellipse'), x: bounds.x, y: bounds.y, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
+      }
+      else if (tagName === 'path') {
+        const d = element.getAttribute('d') || ''
+        const stroke = normalizeColor(element.getAttribute('stroke') || '#333333')
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '2')
+        const fillAttr = element.getAttribute('fill')
+        const fill = fillAttr === 'none' ? undefined : parseFill(fillAttr, gradients)
+        const rotation = parseRotation(element)
+        const parsedPoints = parsePathData(d)
+        const closed = d.trim().toUpperCase().endsWith('Z')
+
+        // Transform path points to canvas coordinates
+        const points = transformPathPoints(parsedPoints, transformX, transformY)
+        const transformedD = reconstructPathData(points, closed)
+        const bounds = calculatePathBounds(points)
+
+        shapes.push(new Path({ id: generateId('path'), x: bounds.x, y: bounds.y, d: transformedD, points, closed, stroke, strokeWidth, fill, rotation }))
+      }
+      else if (tagName === 'line') {
+        const x1 = transformX(parseFloat(element.getAttribute('x1') || '0'))
+        const y1 = transformY(parseFloat(element.getAttribute('y1') || '0'))
+        const x2 = transformX(parseFloat(element.getAttribute('x2') || '0'))
+        const y2 = transformY(parseFloat(element.getAttribute('y2') || '0'))
+
+        // Convert line to path data
+        const d = `M ${x1} ${y1} L ${x2} ${y2}`
+        const stroke = normalizeColor(element.getAttribute('stroke') || '#333333')
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '2')
+        const rotation = parseRotation(element)
+        const points = parsePathData(d)
+        const bounds = calculatePathBounds(points)
+
+        shapes.push(new Path({ id: generateId('line'), x: bounds.x, y: bounds.y, d, points, closed: false, stroke, strokeWidth, fill: undefined, rotation }))
+      }
+      else if (tagName === 'polygon') {
+        const pointsAttr = element.getAttribute('points') || ''
+        if (!pointsAttr.trim()) return
+        const coords = pointsAttr.trim().split(/[\s,]+/).map(parseFloat)
+        if (coords.length < 6) return
+
+        // Transform polygon coordinates
+        let d = `M ${transformX(coords[0])} ${transformY(coords[1])}`
+        for (let i = 2; i < coords.length; i += 2) {
+          d += ` L ${transformX(coords[i])} ${transformY(coords[i + 1])}`
+        }
+        d += ' Z'
+
+        const fill = parseFill(element.getAttribute('fill'), gradients) || '#4CAF50'
+        const stroke = normalizeColor(element.getAttribute('stroke') || '#333333')
+        const strokeWidth = parseFloat(element.getAttribute('stroke-width') || '2')
+        const rotation = parseRotation(element)
+        const points = parsePathData(d)
+        const bounds = calculatePathBounds(points)
+        shapes.push(new Path({ id: generateId('polygon'), x: bounds.x, y: bounds.y, d, points, closed: true, stroke, strokeWidth, fill, rotation }))
+      }
+      else if (tagName === 'g') {
+        // Recursively process group children
+        for (const child of element.children) {
+          processElement(child)
+        }
+      }
+    }
+
+    // Process all children in order to preserve z-index
+    for (const element of svg.children) {
+      processElement(element)
+    }
 
     return shapes
   }
@@ -2059,121 +2071,24 @@
     if (!svgCode || !renderer) return
 
     try {
-      console.log('=== AI Generated SVG Code ===')
-      console.log(svgCode)
-      console.log('=============================')
-      
       const shapes = parseSVGToShapes(svgCode)
-      
-      console.log('=== Parsed Shapes (BEFORE grouping) ===')
-      shapes.forEach((shape, index) => {
-        const bounds = shape.getBounds()
-        console.log(`Shape ${index} (${shape.constructor.name}):`, {
-          id: shape.props.id,
-          x: shape.props.x,
-          y: shape.props.y,
-          bounds: bounds
-        })
-      })
-      console.log('======================================')
       
       if (shapes.length === 0) {
         alert('有効なシェイプが見つかりませんでした')
         return
       }
 
-      if (shapes.length === 1) {
-        // Single shape - add directly
-        renderer.addShape(shapes[0])
-        renderer.selectShape(shapes[0].props.id)
-      } else {
-        // Multiple shapes - need to calculate group bounds and make child coordinates relative
-        
-        // Calculate bounding box of all shapes
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-        shapes.forEach(shape => {
-          const bounds = shape.getBounds()
-          minX = Math.min(minX, bounds.x)
-          minY = Math.min(minY, bounds.y)
-          maxX = Math.max(maxX, bounds.x + bounds.width)
-          maxY = Math.max(maxY, bounds.y + bounds.height)
-        })
-        
-        console.log('=== Group Bounds ===')
-        console.log({ minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY })
-        
-        // Convert child coordinates to be relative to group origin (minX, minY)
-        shapes.forEach(shape => {
-          const deltaX = minX
-          const deltaY = minY
-          
-          shape.props.x -= deltaX
-          shape.props.y -= deltaY
-          
-          // Also adjust center-based shapes (Circle)
-          if (shape instanceof Circle) {
-            if ('cx' in shape.props) shape.props.cx -= deltaX
-            if ('cy' in shape.props) shape.props.cy -= deltaY
-          }
-          
-          // For Path shapes, also adjust the point data and path string
-          if (shape instanceof Path && shape.props.points) {
-            shape.props.points = shape.props.points.map(point => ({
-              ...point,
-              x: point.x - deltaX,
-              y: point.y - deltaY,
-              cp1x: point.cp1x !== undefined ? point.cp1x - deltaX : undefined,
-              cp1y: point.cp1y !== undefined ? point.cp1y - deltaY : undefined,
-              cp2x: point.cp2x !== undefined ? point.cp2x - deltaX : undefined,
-              cp2y: point.cp2y !== undefined ? point.cp2y - deltaY : undefined,
-              cpx: point.cpx !== undefined ? point.cpx - deltaX : undefined,
-              cpy: point.cpy !== undefined ? point.cpy - deltaY : undefined
-            }))
-            
-            // Reconstruct the path data string
-            let newD = ''
-            shape.props.points.forEach((point, i) => {
-              if (point.type === 'M') {
-                newD += `M ${point.x} ${point.y} `
-              } else if (point.type === 'L') {
-                newD += `L ${point.x} ${point.y} `
-              } else if (point.type === 'C' && point.cp1x !== undefined && point.cp2x !== undefined) {
-                newD += `C ${point.cp1x} ${point.cp1y} ${point.cp2x} ${point.cp2y} ${point.x} ${point.y} `
-              } else if (point.type === 'Q' && point.cpx !== undefined) {
-                newD += `Q ${point.cpx} ${point.cpy} ${point.x} ${point.y} `
-              }
-            })
-            if (shape.props.closed) {
-              newD += 'Z'
-            }
-            shape.props.d = newD.trim()
-          }
-        })
-        
-        console.log('=== Shapes (AFTER making relative) ===')
-        shapes.forEach((shape, index) => {
-          console.log(`Shape ${index}:`, {
-            id: shape.props.id,
-            x: shape.props.x,
-            y: shape.props.y
-          })
-        })
-        console.log('=====================================')
-        
-        // Create group at the calculated origin
-        const group = new Group({
-          id: `ai-group-${Date.now()}`,
-          x: minX,
-          y: minY,
-          children: shapes
-        })
-        
-        console.log('=== Created Group ===')
-        console.log({ id: group.props.id, x: group.props.x, y: group.props.y })
-        console.log('====================')
-        
-        renderer.addShape(group)
-        renderer.selectShape(group.props.id)
+      // Add all shapes individually (matching loadSVG behavior)
+      // This avoids coordinate transformation issues with grouping
+      const shapeIds: string[] = []
+      for (const shape of shapes) {
+        renderer.addShape(shape)
+        shapeIds.push(shape.props.id)
+      }
+
+      // Select the first shape if any were added
+      if (shapeIds.length > 0) {
+        renderer.selectShape(shapeIds[0])
       }
       
       hasSelection = true
@@ -3053,7 +2968,16 @@
           <span class="icon">🤖</span>
           <span class="label">AI生成</span>
         </button>
-        
+
+        <button
+          class:active={showModelStore}
+          onclick={() => showModelStore = !showModelStore}
+          title="モデルストア (M)"
+        >
+          <span class="icon">🏪</span>
+          <span class="label">モデルストア</span>
+        </button>
+
         <button
           class:active={showSettingsPanel}
           onclick={() => showSettingsPanel = !showSettingsPanel}
@@ -3100,6 +3024,14 @@
           onClose={() => showSettingsPanel = false}
         />
       </div>
+    {/if}
+
+    <!-- Model Store Overlay -->
+    {#if showModelStore}
+      <ModelStore
+        bind:visible={showModelStore}
+        onClose={() => showModelStore = false}
+      />
     {/if}
   </div>
 </div>

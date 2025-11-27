@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import Store from 'electron-store'
 import { getLlamaManager } from './LlamaManager.js'
+import { ModelManager } from './ModelManager.js'
+import { ModelDownloader } from './ModelDownloader.js'
+import presetModels from './preset-models.json'
 
 // ESM compatibility
 const __filename = fileURLToPath(import.meta.url)
@@ -45,6 +48,10 @@ function initializeAPIKeys() {
 
 let win: BrowserWindow | null
 let pendingClose = false
+
+// Model Store instances
+let modelManager: ModelManager | null = null
+let modelDownloader: ModelDownloader | null = null
 
 function createMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -266,12 +273,31 @@ function initializeLlamaManager() {
   }
 }
 
+// Initialize Model Manager
+async function initializeModelManager() {
+  try {
+    // Get custom directory from store if exists
+    const customDir = store.get('modelStoreDirectory') as string | undefined
+    
+    // Initialize ModelManager
+    modelManager = new ModelManager(customDir)
+    await modelManager.initialize()
+    
+    console.log('ModelManager initialized:', modelManager.getModelsDirectory())
+  } catch (error) {
+    console.error('Failed to initialize ModelManager:', error)
+  }
+}
+
 app.whenReady().then(() => {
   // Initialize API keys from environment variables
   initializeAPIKeys()
 
   // Initialize Llama Manager with saved custom directory
   initializeLlamaManager()
+
+  // Initialize Model Manager
+  initializeModelManager()
 
   createMenu()
   createWindow()
@@ -698,6 +724,169 @@ ipcMain.handle('llama-set-models-dir', async (_event, dirPath: string) => {
     llamaManager.setModelsDirectory(dirPath)
     // Save to electron-store for persistence
     store.set('llamaModelsDirectory', dirPath)
+    return { success: true }
+  } catch (error) {
+    console.error('Error setting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// ========================================
+// Model Store IPC Handlers
+// ========================================
+
+// Get preset models list
+ipcMain.handle('model-store:get-preset-models', async () => {
+  try {
+    return { success: true, models: presetModels.models }
+  } catch (error) {
+    console.error('Error getting preset models:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// List installed models
+ipcMain.handle('model-store:list-models', async () => {
+  try {
+    if (!modelManager) {
+      return { success: false, error: 'ModelManager not initialized' }
+    }
+    const models = await modelManager.listModels()
+    return { success: true, models }
+  } catch (error) {
+    console.error('Error listing models:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Start model download
+ipcMain.handle('model-store:start-download', async (_event, modelId: string) => {
+  try {
+    if (!win || !modelManager) {
+      return { success: false, error: 'ModelManager or Window not initialized' }
+    }
+
+    // Find the preset model
+    const presetModel = presetModels.models.find(m => m.id === modelId)
+    if (!presetModel) {
+      return { success: false, error: 'Preset model not found' }
+    }
+
+    // Create ModelDownloader instance if needed
+    if (!modelDownloader) {
+      modelDownloader = new ModelDownloader(win, modelManager.getModelsDirectory())
+    }
+
+    const result = await modelDownloader.downloadModel(presetModel as any)
+    return result
+  } catch (error) {
+    console.error('Error starting download:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Cancel download
+ipcMain.handle('model-store:cancel-download', async (_event, downloadId: string) => {
+  try {
+    if (!modelDownloader) {
+      return { success: false, error: 'No active downloads' }
+    }
+    return modelDownloader.cancelDownload(downloadId)
+  } catch (error) {
+    console.error('Error canceling download:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Delete model
+ipcMain.handle('model-store:delete-model', async (_event, modelId: string) => {
+  try {
+    if (!modelManager) {
+      return { success: false, error: 'ModelManager not initialized' }
+    }
+    return await modelManager.deleteModel(modelId)
+  } catch (error) {
+    console.error('Error deleting model:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Add model from file
+ipcMain.handle('model-store:add-model', async () => {
+  try {
+    if (!modelManager) {
+      return { success: false, error: 'ModelManager not initialized' }
+    }
+
+    const result = await dialog.showOpenDialog({
+      title: 'Select GGUF Model File',
+      properties: ['openFile'],
+      filters: [
+        { name: 'GGUF Models', extensions: ['gguf'] }
+      ]
+    })
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+
+    return await modelManager.addModel(result.filePaths[0])
+  } catch (error) {
+    console.error('Error adding model:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Get models directory
+ipcMain.handle('model-store:get-models-dir', async () => {
+  try {
+    if (!modelManager) {
+      return { success: false, error: 'ModelManager not initialized' }
+    }
+    const path = modelManager.getModelsDirectory()
+    return { success: true, path }
+  } catch (error) {
+    console.error('Error getting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Select models directory
+ipcMain.handle('model-store:select-models-dir', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Models Directory',
+      properties: ['openDirectory', 'createDirectory']
+    })
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
+    }
+
+    return { success: true, path: result.filePaths[0] }
+  } catch (error) {
+    console.error('Error selecting models directory:', error)
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// Set models directory
+ipcMain.handle('model-store:set-models-dir', async (_event, dirPath: string) => {
+  try {
+    if (!modelManager) {
+      return { success: false, error: 'ModelManager not initialized' }
+    }
+
+    modelManager.setModelsDirectory(dirPath)
+    
+    // Update ModelDownloader if it exists
+    if (modelDownloader) {
+      modelDownloader.setModelsDirectory(dirPath)
+    }
+
+    // Save to electron-store for persistence
+    store.set('modelStoreDirectory', dirPath)
+    
     return { success: true }
   } catch (error) {
     console.error('Error setting models directory:', error)

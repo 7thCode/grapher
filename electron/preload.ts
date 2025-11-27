@@ -46,7 +46,29 @@ contextBridge.exposeInMainWorld('electron', {
   llamaGetConfig: () => ipcRenderer.invoke('llama-get-config'),
   llamaGetLoadedModelName: () => ipcRenderer.invoke('llama-get-loaded-model-name'),
   llamaSelectModelsDir: () => ipcRenderer.invoke('llama-select-models-dir'),
-  llamaSetModelsDir: (dirPath: string) => ipcRenderer.invoke('llama-set-models-dir', dirPath)
+  llamaSetModelsDir: (dirPath: string) => ipcRenderer.invoke('llama-set-models-dir', dirPath),
+
+  // Model Store APIs
+  modelStoreGetPresetModels: () => ipcRenderer.invoke('model-store:get-preset-models'),
+  modelStoreListModels: () => ipcRenderer.invoke('model-store:list-models'),
+  modelStoreStartDownload: (modelId: string) => ipcRenderer.invoke('model-store:start-download', modelId),
+  modelStoreCancelDownload: (downloadId: string) => ipcRenderer.invoke('model-store:cancel-download', downloadId),
+  modelStoreDeleteModel: (modelId: string) => ipcRenderer.invoke('model-store:delete-model', modelId),
+  modelStoreAddModel: () => ipcRenderer.invoke('model-store:add-model'),
+  modelStoreGetModelsDir: () => ipcRenderer.invoke('model-store:get-models-dir'),
+  modelStoreSelectModelsDir: () => ipcRenderer.invoke('model-store:select-models-dir'),
+  modelStoreSetModelsDir: (dirPath: string) => ipcRenderer.invoke('model-store:set-models-dir', dirPath),
+  
+  // Download events
+  onDownloadProgress: (callback: (data: any) => void) => {
+    ipcRenderer.on('download:progress', (_event, data) => callback(data))
+  },
+  onDownloadComplete: (callback: (data: any) => void) => {
+    ipcRenderer.on('download:complete', (_event, data) => callback(data))
+  },
+  onDownloadError: (callback: (data: any) => void) => {
+    ipcRenderer.on('download:error', (_event, data) => callback(data))
+  }
 })
 
 console.log('=== PRELOAD SCRIPT COMPLETED ===')
