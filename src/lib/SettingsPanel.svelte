@@ -461,17 +461,24 @@
   .close-button {
     width: 28px;
     height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    aspect-ratio: 1 / 1;
     background: #d32f2f;
     color: white;
     border: none;
     border-radius: 50%;
     cursor: pointer;
-    font-size: 20px;
+    font-size: 16px;
     line-height: 1;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: background 0.2s;
+    flex-shrink: 0;
+    flex-grow: 0;
+    flex-basis: auto;
   }
 
   .close-button:hover {
